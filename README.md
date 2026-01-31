@@ -8,7 +8,7 @@ To run a simulation, specify the necessary parameters according to your simulati
 
 ### Example
 
-```bash
+```
 ❯ python -m zlibboost.cli.main -h                        
 
   ______ _ _     ____                  _   
