@@ -118,5 +118,4 @@ keywords = {Standard cell, Library characterization, Machine learning}
 }
 ```
 
-Note: This codebase is a tailored version of the one discussed in our paper. While the underlying logic remains consistent, it is not a 1-1 replica of the experimental setup used in the publication.
-
+Note: This codebase is an improved version of the one discussed in our paper, while the underlying logic remains consistent.
