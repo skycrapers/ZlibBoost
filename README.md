@@ -10,6 +10,13 @@ To run a simulation, specify the necessary parameters according to your simulati
 
 ```bash
 ❯ python -m zlibboost.cli.main -h                        
+
+  ______ _ _     ____                  _   
+ |__  / (_) |__ | __ )  ___   ___  ___| |_ 
+   / /| | | '_ \|  _ \ / _ \ / _ \/ __| __|
+  / /_| | | |_) | |_) | (_) | (_) \__ \ |_ 
+ /____|_|_|_.__/|____/ \___/ \___/|___/\__|                                  
+
 usage: zlibboost [-h] [-c CONFIG] [--simulate | --no-simulate]
 
 options:

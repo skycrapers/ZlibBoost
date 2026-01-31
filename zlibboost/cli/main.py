@@ -9,6 +9,13 @@ from zlibboost.cli.pipeline import PipelineConfig, run_pipeline
 from zlibboost.core.logger import LogManager, LOG_LEVELS
 from zlibboost.core.exceptions import ZlibBoostError
 
+BANNER = r"""
+  ______ _ _     ____                  _   
+ |__  / (_) |__ | __ )  ___   ___  ___| |_ 
+   / /| | | '_ \|  _ \ / _ \ / _ \/ __| __|
+  / /_| | | |_) | |_) | (_) | (_) \__ \ |_ 
+ /____|_|_|_.__/|____/ \___/ \___/|___/\__|                                  
+"""
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="zlibboost")
@@ -35,8 +42,13 @@ def _env_flag(name: str, default: bool) -> bool:
         return default
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
+def _print_banner() -> None:
+    print(BANNER.rstrip("\n"))
+    print()
+
 
 def main(argv: list[str] | None = None) -> int:
+    _print_banner()
     parser = build_parser()
     args = parser.parse_args(argv)
 
