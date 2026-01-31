@@ -3,27 +3,25 @@
 ## Introduction
 ZlibBoost is an open-source framework designed for standard cell library characterization.It offers multi-threaded simulation capabilities for both sequential and combinational cells, supporting industry-standard simulators like Spectre and HSPICE, as well as the open-source simulator Ngspice. The tool uses separate TCL files for configuration parameters and template parameters, providing a structured and organized approach. Examples of library characterization are provided using the open-source FreePDK45 technology nodes.
 
-## Citation
-If you use ZlibBoost for your research or industrial applications, please cite the following paper and our project：
+## Usage
+To run a simulation, specify the necessary parameters according to your simulation requirements. The parameters can be provided in a configuration file or directly on the command line, depending on the implementation of your simulation framework.
 
-```bibtex
-@article{10.1145/3747182,
-author = {Chen, Zhengrui and Guo, Chengjun and Wang, Shizhang and Feng, Guozhu and Song, Zixuan and Wu, Zhenhua and Yin, Xunzhao and Song, Weiquan and Zhang, Li and Yan, Zheyu and Zhuo, Cheng},
-title = {ZlibBoost: An Efficient and Flexible Open-Source Framework for Standard Cell Characterization},
-year = {2025},
-publisher = {Association for Computing Machinery},
-address = {New York, NY, USA},
-issn = {1084-4309},
-url = {https://doi.org/10.1145/3747182},
-doi = {10.1145/3747182},
-note = {Just Accepted},
-journal = {ACM Trans. Des. Autom. Electron. Syst.},
-month = jul,
-keywords = {Standard cell, Library characterization, Machine learning}
-}
+### Example
+
+```bash
+❯ python -m zlibboost.cli.main -h                        
+usage: zlibboost [-h] [-c CONFIG] [--simulate | --no-simulate]
+
+options:
+  -h, --help            show this help message and exit
+  -c, --config CONFIG   Config TCL file (repeatable). Template files referenced inside the config will be auto-detected.
+  --simulate, --no-simulate
+                        Run simulations after deck generation. Use --no-simulate to skip.
 ```
 
-Note: This codebase is a tailored version of the one discussed in our paper. While the underlying logic remains consistent, it is not a 1-1 replica of the experimental setup used in the publication.
+```
+python -m zlibboost.cli.main -c examples/config_f45.tcl
+```
 
 ## Configuration Parameters
 Configuration parameters are provided via `set_var <name> <value>` in the config TCL files passed to `-c/--config`. The refactored CLI merges config files in order and auto-detects the timing TCL from `template_file`. Required by the pipeline: `extsim_deck_dir`, `template_file`, `spicefiles`, and `report_path`.
@@ -90,25 +88,28 @@ The refactored CLI also accepts environment variables:
 | ZLIBBOOST_SIM_TYPES     | hidden,leakage,delay    | Fallback sim type filter if `simulate_types` is not set in config.          |
 | DRIVER_WAVEFORM_TYPE    | 2                       | Driver waveform shape (1=linear, 2=exp, 3=mixed); usually set via config.   |
 
-## Usage
-To run a simulation, specify the necessary parameters according to your simulation requirements. The parameters can be provided in a configuration file or directly on the command line, depending on the implementation of your simulation framework.
-
-### Example
-
-```bash
-❯ python -m zlibboost.cli.main -h                        
-usage: zlibboost [-h] [-c CONFIG] [--simulate | --no-simulate]
-
-options:
-  -h, --help            show this help message and exit
-  -c, --config CONFIG   Config TCL file (repeatable). Template files referenced inside the config will be auto-detected.
-  --simulate, --no-simulate
-                        Run simulations after deck generation. Use --no-simulate to skip.
-```
-
-```
-python -m zlibboost.cli.main -c examples/config_f45.tcl
-```
-
 ## Related Project
 - [ZlibValidation](https://github.com/Cedar17/ZlibValidation) — Command line tool to validate standard cell libraries in `.lib` format.
+
+## Citation
+If you use ZlibBoost for your research or industrial applications, please cite the following paper and our project：
+
+```bibtex
+@article{10.1145/3747182,
+author = {Chen, Zhengrui and Guo, Chengjun and Wang, Shizhang and Feng, Guozhu and Song, Zixuan and Wu, Zhenhua and Yin, Xunzhao and Song, Weiquan and Zhang, Li and Yan, Zheyu and Zhuo, Cheng},
+title = {ZlibBoost: An Efficient and Flexible Open-Source Framework for Standard Cell Characterization},
+year = {2025},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+issn = {1084-4309},
+url = {https://doi.org/10.1145/3747182},
+doi = {10.1145/3747182},
+note = {Just Accepted},
+journal = {ACM Trans. Des. Autom. Electron. Syst.},
+month = jul,
+keywords = {Standard cell, Library characterization, Machine learning}
+}
+```
+
+Note: This codebase is a tailored version of the one discussed in our paper. While the underlying logic remains consistent, it is not a 1-1 replica of the experimental setup used in the publication.
+
