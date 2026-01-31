@@ -3,6 +3,28 @@
 ## Introduction
 ZlibBoost is an open-source framework designed for standard cell library characterization.It offers multi-threaded simulation capabilities for both sequential and combinational cells, supporting industry-standard simulators like Spectre and HSPICE, as well as the open-source simulator Ngspice. The tool uses separate TCL files for configuration parameters and template parameters, providing a structured and organized approach. Examples of library characterization are provided using the open-source FreePDK45 technology nodes.
 
+## Citation
+If you use ZlibBoost for your research or industrial applications, please cite the following paper and our project：
+
+```bibtex
+@article{10.1145/3747182,
+author = {Chen, Zhengrui and Guo, Chengjun and Wang, Shizhang and Feng, Guozhu and Song, Zixuan and Wu, Zhenhua and Yin, Xunzhao and Song, Weiquan and Zhang, Li and Yan, Zheyu and Zhuo, Cheng},
+title = {ZlibBoost: An Efficient and Flexible Open-Source Framework for Standard Cell Characterization},
+year = {2025},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+issn = {1084-4309},
+url = {https://doi.org/10.1145/3747182},
+doi = {10.1145/3747182},
+note = {Just Accepted},
+journal = {ACM Trans. Des. Autom. Electron. Syst.},
+month = jul,
+keywords = {Standard cell, Library characterization, Machine learning}
+}
+```
+
+Note: This codebase is a tailored version of the one discussed in our paper. While the underlying logic remains consistent, it is not a 1-1 replica of the experimental setup used in the publication.
+
 ## Configuration Parameters
 Configuration parameters are provided via `set_var <name> <value>` in the config TCL files passed to `-c/--config`. The refactored CLI merges config files in order and auto-detects the timing TCL from `template_file`. Required by the pipeline: `extsim_deck_dir`, `template_file`, `spicefiles`, and `report_path`.
 | Command                 | Example                    | Description                                                                 |
