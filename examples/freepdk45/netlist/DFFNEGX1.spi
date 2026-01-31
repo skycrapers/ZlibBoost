@@ -1,0 +1,48 @@
+
+    .subckt DFFNEGX1 CLK vdd D vss Q
+M0 vdd CLK a_2_6# vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M1 a_17_74# D vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M2 a_23_6# a_2_6# a_17_74# vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M3 a_31_74# CLK a_23_6# vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M4 vdd a_34_4# a_31_74# vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M5 a_34_4# a_23_6# vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M6 a_61_74# a_34_4# vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M7 a_66_6# CLK a_61_74# vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M8 a_76_84# a_2_6# a_66_6# vdd PMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M9 vdd Q a_76_84# vdd PMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M10 vss CLK a_2_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M11 Q a_66_6# vdd vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M12 a_17_6# D vss vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M13 a_23_6# CLK a_17_6# vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M14 a_31_6# a_2_6# a_23_6# vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M15 vss a_34_4# a_31_6# vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M16 a_34_4# a_23_6# vss vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M17 a_61_6# a_34_4# vss vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M18 a_66_6# a_2_6# a_61_6# vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M19 a_76_6# CLK a_66_6# vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M20 vss Q a_76_6# vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M21 Q a_66_6# vss vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+
+.ENDS

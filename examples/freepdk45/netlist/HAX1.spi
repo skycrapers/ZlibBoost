@@ -1,0 +1,32 @@
+
+    .subckt HAX1 vdd vss YC A B YS
+M0 vdd A a_2_74# vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M1 a_2_74# B vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M2 vdd a_2_74# YC vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M3 a_41_74# a_2_74# vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M4 a_49_54# B a_41_74# vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M5 vdd A a_49_54# vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M6 YS a_41_74# vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M7 a_9_6# A vss vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M8 a_2_74# B a_9_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M9 vss a_2_74# YC vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M10 a_38_6# a_2_74# vss vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M11 a_41_74# B a_38_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M12 a_38_6# A a_41_74# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M13 YS a_41_74# vss vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+
+.ENDS

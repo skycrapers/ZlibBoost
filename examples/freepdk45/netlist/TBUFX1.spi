@@ -1,0 +1,16 @@
+
+    .subckt TBUFX1 vdd vss EN A Y
+M0 a_9_6# EN vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M1 a_26_54# a_9_6# Y vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M2 vdd A a_26_54# vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M3 a_9_6# EN vss vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M4 a_26_6# EN Y vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M5 vss A a_26_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+
+.ENDS

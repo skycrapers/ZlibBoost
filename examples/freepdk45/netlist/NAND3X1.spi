@@ -1,0 +1,16 @@
+
+    .subckt NAND3X1 B vdd vss A C Y
+M0 Y A vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M1 vdd B Y vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M2 Y C vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M3 a_9_6# A vss vss NMOS_VTH w=0.75u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M4 a_14_6# B a_9_6# vss NMOS_VTH w=0.75u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M5 Y C a_14_6# vss NMOS_VTH w=0.75u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+
+.ENDS

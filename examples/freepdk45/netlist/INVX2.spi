@@ -1,0 +1,8 @@
+
+    .subckt INVX2 vdd vss Y A
+M0 Y A vdd vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M1 Y A vss vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+
+.ENDS

@@ -1,0 +1,12 @@
+
+    .subckt NAND2X1 vdd Y vss A B
+M0 Y A vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M1 vdd B Y vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M2 a_9_6# A vss vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M3 Y B a_9_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+
+.ENDS

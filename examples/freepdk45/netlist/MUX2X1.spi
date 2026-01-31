@@ -1,0 +1,24 @@
+
+    .subckt MUX2X1 S vdd vss Y A B
+M0 vdd S a_2_10# vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M1 a_17_50# B vdd vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M2 Y S a_17_50# vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M3 a_30_54# a_2_10# Y vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M4 vdd A a_30_54# vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M5 vss S a_2_10# vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M6 a_17_10# B vss vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M7 Y a_2_10# a_17_10# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M8 a_30_10# S Y vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M9 vss A a_30_10# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+
+.ENDS

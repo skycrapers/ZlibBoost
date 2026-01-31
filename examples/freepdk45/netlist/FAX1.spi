@@ -1,0 +1,60 @@
+
+    .subckt FAX1 vss vdd A B C YC YS
+M0 vdd A a_2_54# vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M1 a_2_54# B vdd vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M2 a_25_6# C a_2_54# vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M3 a_33_54# B a_25_6# vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M4 vdd A a_33_54# vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M5 a_46_54# A vdd vdd PMOS_VTH w=1u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M6 vdd B a_46_54# vdd PMOS_VTH w=3.6u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M7 a_46_54# C vdd vdd PMOS_VTH w=3.6u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M8 a_70_6# a_25_6# a_46_54# vdd PMOS_VTH w=3.6u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M9 a_79_46# C a_70_6# vdd PMOS_VTH w=4.8u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M10 a_84_46# B a_79_46# vdd PMOS_VTH w=4.8u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M11 vdd A a_84_46# vdd PMOS_VTH w=4.8u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M12 YS a_70_6# vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M13 YC a_25_6# vdd vdd PMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M14 vss A a_2_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M15 a_2_6# B vss vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M16 a_25_6# C a_2_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M17 a_33_6# B a_25_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M18 vss A a_33_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M19 a_46_6# A vss vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M20 vss B a_46_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M21 a_46_6# C vss vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M22 a_70_6# a_25_6# a_46_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M23 a_79_6# C a_70_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M24 a_84_6# B a_79_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M25 vss A a_84_6# vss NMOS_VTH w=0.5u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M26 YS a_70_6# vss vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+M27 YC a_25_6# vss vss NMOS_VTH w=0.25u l=0.05u
++ ad=0p pd=0u as=0p ps=0u 
+
+.ENDS
