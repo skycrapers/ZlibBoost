@@ -1,6 +1,6 @@
 # ZlibBoost
 ## Introduction
-ZlibBoost is an open-source framework designed for standard cell library characterization.It offers multi-threaded simulation capabilities for both sequential and combinational cells, supporting industry-standard simulators like Spectre and HSPICE, as well as the open-source simulator Ngspice. The tool uses separate TCL files for configuration parameters and template parameters, providing a structured and organized approach. Examples of library characterization are provided using the open-source Sky130 and FreePDK45 technology nodes.
+ZlibBoost is an open-source framework designed for standard cell library characterization.It offers multi-threaded simulation capabilities for both sequential and combinational cells, supporting industry-standard simulators like Spectre and HSPICE, as well as the open-source simulator Ngspice. The tool uses separate TCL files for configuration parameters and template parameters, providing a structured and organized approach. Examples of library characterization are provided using the open-source FreePDK45 technology nodes.
 
 ## Configuration Parameters
 Configuration parameters are provided via `set_var <name> <value>` in the config TCL files passed to `-c/--config`. The refactored CLI merges config files in order and auto-detects the timing TCL from `template_file`. Required by the pipeline: `extsim_deck_dir`, `template_file`, `spicefiles`, and `report_path`.
