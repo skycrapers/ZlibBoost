@@ -1,4 +1,5 @@
 # ZlibBoost
+
 ## Introduction
 ZlibBoost is an open-source framework designed for standard cell library characterization.It offers multi-threaded simulation capabilities for both sequential and combinational cells, supporting industry-standard simulators like Spectre and HSPICE, as well as the open-source simulator Ngspice. The tool uses separate TCL files for configuration parameters and template parameters, providing a structured and organized approach. Examples of library characterization are provided using the open-source FreePDK45 technology nodes.
 
@@ -86,3 +87,6 @@ options:
 ```
 python -m zlibboost.cli.main -c examples/config_f45.tcl
 ```
+
+## Related Project
+- [ZlibValidation](https://github.com/Cedar17/ZlibValidation) — Command line tool to validate standard cell libraries in `.lib` format.
