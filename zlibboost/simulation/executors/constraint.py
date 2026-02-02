@@ -80,7 +80,22 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
             self.postprocess(result, output_dir, engine_dir)
             return result
 
-        initial_payload = self._simulate_single(deck_path, metadata, engine_dir)
+        initial_deck = deck_path
+        initial_shift = self._resolve_initial_shift(metadata)
+        if initial_shift:
+            # Start from a "safe" stimulus (large positive effective shift) so the
+            # first measurement is likely to produce a valid DegradeDelay. This
+            # avoids wasting a run at zero-shift that often fails for constraints.
+            shifter = ConstraintDeckOptimizer(
+                deck_path=deck_path,
+                metadata=metadata,
+                engine_dir=engine_dir,
+                run_callback=lambda *_args, **_kwargs: MeasurementPayload(metrics={}),
+                reference_shift=initial_shift,
+            )
+            initial_deck = shifter._write_adjusted_deck(initial_shift)
+
+        initial_payload = self._simulate_single(initial_deck, metadata, engine_dir)
         if initial_payload is None:
             result = self._build_result(
                 deck_path=deck_path,
@@ -91,7 +106,7 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
             )
         else:
             optimized_payload, optimization = self._maybe_optimize(
-                deck_path, metadata, engine_dir, initial_payload
+                deck_path, metadata, engine_dir, initial_payload, initial_shift=initial_shift
             )
             status = "completed" if optimized_payload.metrics else "missing_measurement"
             result = self._build_result(
@@ -114,6 +129,40 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
         self.postprocess(result, output_dir, engine_dir)
 
         return result
+
+    @staticmethod
+    def _resolve_initial_shift(metadata: Dict[str, Any]) -> float:
+        """Return the initial effective time shift (in seconds) for constraint sims.
+
+        The optimizer and measurement templates assume the first half of the
+        simulation window is used for initialization, and most measurements use
+        TD=half_tran_tend. Starting at a positive "safe" shift greatly improves
+        the probability that DegradeDelay is measurable on the first run.
+        """
+
+        timing_type = str(metadata.get("timing_type", "")).lower()
+        # Removal uses a different optimization loop; keep legacy behaviour.
+        if "removal" in timing_type:
+            return 0.0
+
+        raw = metadata.get("constraint_initial_shift")
+        if raw is None:
+            return ConstraintDeckOptimizer.DEFAULT_REFERENCE_SHIFT
+
+        try:
+            numeric = float(raw)
+        except (TypeError, ValueError):
+            return ConstraintDeckOptimizer.DEFAULT_REFERENCE_SHIFT
+
+        if abs(numeric) <= 1e-18:
+            return 0.0
+
+        # Mirror legacy normalization used elsewhere: treat values larger than
+        # 1e-6 as nanoseconds, otherwise as seconds.
+        if abs(numeric) > 1e-6:
+            numeric *= 1e-9
+
+        return abs(numeric)
 
     def _prepare_environment(self, output_dir: Path) -> None:
         (output_dir / "simulation").mkdir(parents=True, exist_ok=True)
@@ -198,6 +247,8 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
         metadata: Dict[str, Any],
         engine_dir: Path,
         payload: MeasurementPayload,
+        *,
+        initial_shift: float = 0.0,
     ) -> tuple[MeasurementPayload, Optional[OptimizationResult]]:
         sim_type = str(metadata.get("sim_type", "")).lower()
         timing_type = str(metadata.get("timing_type", "")).lower()
@@ -236,7 +287,7 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
                 engine_dir=engine_dir,
                 run_callback=run_callback,
             )
-            result = optimizer.run(payload)
+            result = optimizer.run(payload, initial_shift=initial_shift)
         metrics = dict(payload.metrics)
         metrics.update(result.payload.metrics)
         metrics.setdefault("constraint", payload.metrics.get("constraint"))

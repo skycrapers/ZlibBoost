@@ -32,7 +32,11 @@ def parse_hspice_measurement_table(measurement_path: Path) -> Tuple[List[Dict[st
             continue
 
         if not data_started:
-            if _all_numbers(parts):
+            # HSPICE can emit non-numeric sentinel tokens (e.g. "failed") in
+            # the data row, so "all numbers" is not a reliable delimiter.
+            # Instead, treat the first line that starts with a value as the
+            # beginning of the data section.
+            if parts and _is_value_token(parts[0]):
                 data_started = True
                 data_tokens.extend(parts)
             else:
@@ -63,7 +67,13 @@ def parse_hspice_measurement_table(measurement_path: Path) -> Tuple[List[Dict[st
 
 
 def _parse_number(token: str) -> float:
-    normalized = token.replace("D", "E").replace("d", "e")
+    normalized = token.strip()
+    if not normalized:
+        raise ValueError("empty token")
+    lower = normalized.lower()
+    if lower in {"failed", "nan"}:
+        return float("nan")
+    normalized = normalized.replace("D", "E").replace("d", "e")
     return float(normalized)
 
 
@@ -71,6 +81,15 @@ def _all_numbers(tokens: Sequence[str]) -> bool:
     try:
         for token in tokens:
             _parse_number(token)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_value_token(token: str) -> bool:
+    """Return True when token looks like a data value rather than a column name."""
+    try:
+        _parse_number(token)
     except ValueError:
         return False
     return True

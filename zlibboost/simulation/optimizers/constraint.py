@@ -27,9 +27,12 @@ class ConstraintDeckOptimizer:
     """Iteratively adjust constraint decks to match legacy constraint targets."""
 
     DEFAULT_TARGET_RATIO = 1.1
-    DEFAULT_REFERENCE_SHIFT = 1e-9
-    DEFAULT_SEARCH_LO = -1e-9
-    DEFAULT_SEARCH_HI = 1e-9
+    # Use a larger default window so the first "safe" reference measurement
+    # has a high chance of producing a valid DegradeDelay and the subsequent
+    # bracket search can converge even for slower corners/cells.
+    DEFAULT_REFERENCE_SHIFT = 10e-9
+    DEFAULT_SEARCH_LO = -10e-9
+    DEFAULT_SEARCH_HI = 10e-9
     DEFAULT_CACHE_TOLERANCE = 1e-13
     DEFAULT_WINDOW_RATIO = 0.02
     DEFAULT_INFINITY = 1e19
@@ -69,7 +72,7 @@ class ConstraintDeckOptimizer:
     # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
-    def run(self, initial_payload: MeasurementPayload) -> OptimizationResult:
+    def run(self, initial_payload: MeasurementPayload, *, initial_shift: float = 0.0) -> OptimizationResult:
         """Execute a legacy-aligned optimization loop.
 
         Legacy behaviour summary:
@@ -79,8 +82,22 @@ class ConstraintDeckOptimizer:
         - Search only inside [search_lo, search_hi].
         """
 
-        reference_payload = self._evaluate(self._reference_shift)
-        reference_degradation = self._get_degradation(reference_payload)
+        initial_shift = float(initial_shift)
+        reference_payload: MeasurementPayload | None = None
+        reference_degradation: float | None = None
+
+        # If the executor already simulated the reference shift (typical when we
+        # start from a "safe" initial shift), reuse that result instead of
+        # re-running the exact same simulation.
+        if abs(initial_shift - self._reference_shift) <= self._cache_tolerance:
+            candidate = self._get_degradation(initial_payload)
+            if candidate is not None:
+                reference_payload = initial_payload
+                reference_degradation = candidate
+
+        if reference_payload is None or reference_degradation is None:
+            reference_payload = self._evaluate(self._reference_shift)
+            reference_degradation = self._get_degradation(reference_payload)
         if reference_payload is None or reference_degradation is None:
             return OptimizationResult(
                 payload=initial_payload,
@@ -96,6 +113,17 @@ class ConstraintDeckOptimizer:
 
         cache: Dict[float, tuple[float, Optional[MeasurementPayload]]] = {}
         evaluated: list[tuple[float, float, MeasurementPayload]] = []
+
+        # Seed the cache with the already-simulated initial shift to avoid
+        # duplicating work when it overlaps with endpoints or midpoints.
+        initial_degradation = self._get_degradation(initial_payload)
+        if initial_degradation is not None:
+            if lower_bound <= initial_degradation <= upper_bound:
+                obj = 0.0
+            else:
+                obj = initial_degradation - target
+            cache[initial_shift] = (obj, initial_payload)
+            evaluated.append((initial_shift, obj, initial_payload))
 
         def find_cached(shift: float) -> tuple[float | None, tuple[float, Optional[MeasurementPayload]] | None]:
             for cached_shift, cached in cache.items():
@@ -275,12 +303,41 @@ class ConstraintDeckOptimizer:
 
     def _inject_time_shift(self, content: str, shift: float) -> str:
         target_pin = self._resolve_target_pin()
-        if not target_pin:
+        if not target_pin or abs(shift) < 1e-18:
             return content
 
-        pattern = re.compile(rf"(half_tran_tend\+{re.escape(target_pin)}_t\d+)")
-        shift_str = self._format_shift(shift)
+        pin_to_shift, actual_shift = self._resolve_shift_pin(target_pin, shift)
+        if not pin_to_shift:
+            return content
+
+        pattern = re.compile(rf"(half_tran_tend\+{re.escape(pin_to_shift)}_t\d+)")
+        shift_str = self._format_shift(actual_shift)
         return pattern.sub(lambda match: f"{match.group(1)}{shift_str}", content)
+
+    def _resolve_shift_pin(self, target_pin: str, shift: float) -> tuple[str | None, float]:
+        """Return (pin_to_shift, positive_shift_seconds).
+
+        We keep the simulation's first half as an initialization window and
+        measure with TD=half_tran_tend. Shifting a pin *earlier* (negative shift)
+        risks moving its threshold crossing before half_tran_tend, making .meas
+        triggers fail. To explore negative effective shifts safely, delay the
+        *opposite* pin by the same magnitude instead.
+        """
+
+        if shift >= 0:
+            return target_pin, shift
+
+        alternate = None
+        if target_pin == self._pin:
+            alternate = self._related
+        elif target_pin == self._related:
+            alternate = self._pin
+
+        if not alternate:
+            # Fall back to legacy behaviour when we cannot determine an alternate.
+            return target_pin, shift
+
+        return alternate, -shift
 
     def _resolve_target_pin(self) -> str:
         if "hold" in self._timing_type or "removal" in self._timing_type:
