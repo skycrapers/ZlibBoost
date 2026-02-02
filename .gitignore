@@ -1,2 +1,4 @@
 __pychache__/
 *.pyc
+!zlibboost/arc_generation/*.pyc
+!zlibboost/arc_generation/extractors/*.pyc
