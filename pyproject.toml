@@ -8,7 +8,7 @@ version = "2.0.0"
 description = "An open-source framework for standard cell library characterization."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
-license = { text = "Apache-2.0" }
+license = { text = "BSD 3-Clause License with Commercial Use Restriction" }
 authors = [{ name = "ZlibBoost Team" }]
 dependencies = ["numpy>=1.26"]
 

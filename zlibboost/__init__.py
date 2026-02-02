@@ -14,12 +14,12 @@ ZlibBoost 是一个开源的标准单元库表征框架，支持从 TCL 配置�
 - 结果分析与优化
 
 版本: 2.0.0
-许可证: Apache-2.0
+许可证: BSD 3-Clause License with Commercial Use Restriction
 """
 
 __version__ = "2.0.0"
 __author__ = "ZlibBoost Team"
-__license__ = "Apache-2.0"
+__license__ = "BSD 3-Clause License with Commercial Use Restriction"
 
 # 导入主要模块
 from . import core
