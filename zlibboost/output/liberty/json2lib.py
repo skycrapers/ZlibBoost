@@ -237,8 +237,38 @@ class Json2Liberty:
             for pin_name, pin_data in cell_data["pins"].items():
                 self._write_pin(fh, indent + 2, pin_name, pin_data)
 
+        # Write latch data - only when latch data is not empty
+        if "latch(IQ,IQN)" in cell_data:
+            latch_data = cell_data["latch(IQ,IQN)"]
+            if latch_data:
+                fh.write(f"{indent_str}  latch(IQ, IQN) {{\n")
+                if "clear" in latch_data:
+                    fh.write(f'{indent_str}    clear : "{latch_data["clear"]}";\n')
+                if "clear_preset_var1" in latch_data:
+                    fh.write(
+                        f"{indent_str}    clear_preset_var1 : {latch_data['clear_preset_var1']};\n"
+                    )
+                if "clear_preset_var2" in latch_data:
+                    fh.write(
+                        f"{indent_str}    clear_preset_var2 : {latch_data['clear_preset_var2']};\n"
+                    )
+                if "data_in" in latch_data:
+                    fh.write(
+                        f'{indent_str}    data_in : "{latch_data["data_in"]}";\n'
+                    )
+                if "enable" in latch_data:
+                    fh.write(
+                        f'{indent_str}    enable : "{latch_data["enable"]}";\n'
+                    )
+                if "power_down_function" in latch_data:
+                    fh.write(
+                        f'{indent_str}    power_down_function : "{latch_data["power_down_function"]}";\n'
+                    )
+                if "preset" in latch_data:
+                    fh.write(f'{indent_str}    preset : "{latch_data["preset"]}";\n')
+                fh.write(f"{indent_str}  }}\n")
         # Write ff data - only when ff data is not empty
-        if "ff(IQ,IQN)" in cell_data:
+        elif "ff(IQ,IQN)" in cell_data:
             ff_data = cell_data["ff(IQ,IQN)"]
             if ff_data:
                 fh.write(f"{indent_str}  ff(IQ, IQN) {{\n")
@@ -252,6 +282,14 @@ class Json2Liberty:
                     )
                 if "clear" in ff_data:
                     fh.write(f'{indent_str}    clear : "{ff_data["clear"]}";\n')
+                if "clear_preset_var1" in ff_data:
+                    fh.write(
+                        f"{indent_str}    clear_preset_var1 : {ff_data['clear_preset_var1']};\n"
+                    )
+                if "clear_preset_var2" in ff_data:
+                    fh.write(
+                        f"{indent_str}    clear_preset_var2 : {ff_data['clear_preset_var2']};\n"
+                    )
                 if "preset" in ff_data:
                     fh.write(f'{indent_str}    preset : "{ff_data["preset"]}";\n')
                 if "power_down_function" in ff_data:

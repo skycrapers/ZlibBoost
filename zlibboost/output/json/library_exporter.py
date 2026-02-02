@@ -345,7 +345,143 @@ class CellSerializer:
         # Populate timing/internal power/leakage using arcs
         self._populate_arc_data(cell, library_db, cell_node)
 
+        latch_payload = self._build_latch_payload(cell)
+        if latch_payload:
+            cell_node["latch(IQ,IQN)"] = latch_payload
+        else:
+            ff_payload = self._build_ff_payload(cell)
+            if ff_payload:
+                cell_node["ff(IQ,IQN)"] = ff_payload
+
         return cell_node
+
+    def _build_latch_payload(self, cell: Cell) -> Optional[Dict[str, str]]:
+        """Build legacy latch payload from cell pin categories."""
+        if not cell.is_latch:
+            return None
+
+        clock_pins = list(cell.get_clock_pins())
+        clock_negative_pins = list(cell.get_clock_negative_pins())
+        if clock_pins or clock_negative_pins:
+            return None
+
+        data_pins = list(cell.get_data_pins())
+        enable_pins = list(cell.get_enable_pins())
+        async_pins = set(cell.get_async_pins())
+        reset_pins = set(cell.get_reset_pins())
+        set_pins = set(cell.get_set_pins())
+
+        data_pin = data_pins[0] if data_pins else None
+        enable_pin = enable_pins[0] if enable_pins else None
+        if data_pin is None or enable_pin is None:
+            return None
+
+        clear_pins = list(async_pins & reset_pins)
+        preset_pins = list(async_pins & set_pins)
+
+        latch_payload: Dict[str, str] = {
+            "data_in": data_pin,
+        }
+
+        enable_expr = enable_pin
+        if enable_pin in cell.pins and cell.pins[enable_pin].is_negative:
+            enable_expr = f"!{enable_pin}"
+        latch_payload["enable"] = enable_expr
+
+        if clear_pins:
+            latch_payload["clear"] = f"!{clear_pins[0]}"
+        if preset_pins:
+            latch_payload["preset"] = f"!{preset_pins[0]}"
+        if clear_pins and preset_pins:
+            latch_payload["clear_preset_var1"] = "H"
+            latch_payload["clear_preset_var2"] = "L"
+
+        latch_payload["power_down_function"] = "(!VDD) + (VSS)"
+
+        return latch_payload
+
+    def _build_ff_payload(self, cell: Cell) -> Optional[Dict[str, str]]:
+        """Build legacy ff/latch payload from cell pin categories."""
+        if not (cell.is_sequential or cell.has_async_pins):
+            return None
+
+        clock_pins = list(cell.get_clock_pins())
+        clock_negative_pins = list(cell.get_clock_negative_pins())
+        sync_pins = set(cell.get_sync_pins())
+        async_pins = set(cell.get_async_pins())
+        reset_pins = set(cell.get_reset_pins())
+        set_pins = set(cell.get_set_pins())
+        data_pins = list(cell.get_data_pins())
+        scan_enable_pins = list(cell.get_scan_enable_pins())
+        scan_in_pins = list(cell.get_scan_in_pins())
+        enable_pins = list(cell.get_enable_pins())
+
+        clear_sync_pins = list(sync_pins & reset_pins)
+        preset_sync_pins = list(sync_pins & set_pins)
+        clear_pins = list(async_pins & reset_pins)
+        preset_pins = list(async_pins & set_pins)
+
+        data_pin = data_pins[0] if data_pins else None
+        scan_enable_pin = scan_enable_pins[0] if scan_enable_pins else None
+        scan_in_pin = scan_in_pins[0] if scan_in_pins else None
+        enable_pin = enable_pins[0] if enable_pins else None
+        preset_sync_pin = preset_sync_pins[0] if preset_sync_pins else None
+        clear_sync_pin = clear_sync_pins[0] if clear_sync_pins else None
+
+        if data_pin is None and scan_in_pin is None:
+            return None
+
+        ff_payload: Dict[str, str] = {}
+        if clear_pins:
+            ff_payload["clear"] = f"(!{clear_pins[0]})"
+        if preset_pins:
+            ff_payload["preset"] = f"(!{preset_pins[0]})"
+
+        if clock_pins:
+            ff_payload["clocked_on"] = clock_pins[0]
+        elif clock_negative_pins:
+            ff_payload["clocked_on"] = clock_negative_pins[0]
+        elif enable_pin:
+            ff_payload["clocked_on"] = enable_pin
+
+        next_state_expr = data_pin
+        if preset_sync_pin:
+            next_state_expr = f"(!{preset_sync_pin} + {data_pin})"
+        if clear_sync_pin:
+            next_state_expr = f"({data_pin} * {clear_sync_pin})"
+        if preset_sync_pin and clear_sync_pin:
+            next_state_expr = f"((!{preset_sync_pin} + {data_pin}) * {clear_sync_pin})"
+        if enable_pin:
+            next_state_expr = f"(({enable_pin} * {data_pin}) + (!{enable_pin} * IQ))"
+        if enable_pin and clear_sync_pin:
+            next_state_expr = f"(({enable_pin} * {data_pin}) + (!{enable_pin} * IQ) * {clear_sync_pin})"
+        if scan_enable_pin:
+            next_state_expr = f"(({scan_in_pin} * {scan_enable_pin}) + (!{scan_enable_pin} * {data_pin}))"
+        if scan_enable_pin and preset_sync_pin:
+            next_state_expr = f"(({scan_in_pin} * {scan_enable_pin}) + (!{scan_enable_pin} * (!{preset_sync_pin} + {data_pin})))"
+        if scan_enable_pin and clear_sync_pin:
+            next_state_expr = f"(({scan_enable_pin} * {scan_in_pin}) +(!{scan_enable_pin}*({data_pin} * {clear_sync_pin})))"
+        if scan_enable_pin and preset_sync_pin and clear_sync_pin:
+            next_state_expr = f"(({scan_enable_pin} * {scan_in_pin}) + (!{scan_enable_pin}*((!{preset_sync_pin} + {data_pin}) * {clear_sync_pin})))"
+        if enable_pin and scan_enable_pin:
+            next_state_expr = (
+                f"(({scan_in_pin} * {scan_enable_pin}) + (!{scan_enable_pin} * (({enable_pin} * {data_pin}) + (!{enable_pin} * IQ))))"
+            )
+        if enable_pin and scan_enable_pin and clear_sync_pin:
+            next_state_expr = (
+                f"(({scan_in_pin} * {scan_enable_pin}) + (!{scan_enable_pin} * (({enable_pin} * {data_pin}) + (!{enable_pin} * IQ)) * {clear_sync_pin}))"
+            )
+
+        if next_state_expr:
+            ff_payload["next_state"] = next_state_expr
+
+        if ff_payload.get("clear") or ff_payload.get("preset"):
+            ff_payload["clear_preset_var1"] = "L"
+            ff_payload["clear_preset_var2"] = "L"
+
+        ff_payload["power_down_function"] = "(!VDD) + (VSS)"
+
+        return ff_payload
 
     def _serialize_pin(self, cell: Cell, pin: PinInfo) -> Dict[str, Any]:
         function_str = ""
