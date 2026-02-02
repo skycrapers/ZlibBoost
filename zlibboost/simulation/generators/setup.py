@@ -167,22 +167,22 @@ class SetupSpiceGenerator(BaseSpiceGenerator):
             # Setup/recovery: data pin triggers, related pin targets
             lines.append(
                 f".meas tran ZlibBoostDelay "
-                f"trig v({main_pin}) val={threshold_voltage} {output_edge}=last "
-                f"targ v({related_pin}) val={threshold_voltage} {input_edge}=last\n"
+                f"trig v({main_pin}) val={threshold_voltage} {output_edge}=last TD=half_tran_tend "
+                f"targ v({related_pin}) val={threshold_voltage} {input_edge}=last TD=half_tran_tend\n"
             )
         elif 'hold' in timing_type or 'removal' in timing_type:
             # Hold/removal: related pin triggers, data pin targets
             lines.append(
                 f".meas tran ZlibBoostDelay "
-                f"trig v({related_pin}) val={threshold_voltage} {input_edge}=last "
-                f"targ v({main_pin}) val={threshold_voltage} {output_edge}=last\n"
+                f"trig v({related_pin}) val={threshold_voltage} {input_edge}=last TD=half_tran_tend "
+                f"targ v({main_pin}) val={threshold_voltage} {output_edge}=last TD=half_tran_tend\n"
             )
         else:
             # Default to setup behavior for other timing types
             lines.append(
                 f".meas tran ZlibBoostDelay "
-                f"trig v({main_pin}) val={threshold_voltage} {output_edge}=last "
-                f"targ v({related_pin}) val={threshold_voltage} {input_edge}=last\n"
+                f"trig v({main_pin}) val={threshold_voltage} {output_edge}=last TD=half_tran_tend "
+                f"targ v({related_pin}) val={threshold_voltage} {input_edge}=last TD=half_tran_tend\n"
             )
 
         return lines
@@ -250,8 +250,8 @@ class SetupSpiceGenerator(BaseSpiceGenerator):
 
         lines.append(
             f".meas tran DegradeDelay "
-            f"trig v({related_pin}) val={threshold_voltage} {related_edge}=last "
-            f"targ v({primary_output}) val={threshold_voltage} {output_edge}=last"
+            f"trig v({related_pin}) val={threshold_voltage} {related_edge}=last TD=half_tran_tend "
+            f"targ v({primary_output}) val={threshold_voltage} {output_edge}=last TD=half_tran_tend"
         )
 
         if not is_negative_output:
