@@ -3,10 +3,31 @@
 ## Introduction
 ZlibBoost is an open-source framework designed for standard cell library characterization.It offers multi-threaded simulation capabilities for both sequential and combinational cells, supporting industry-standard simulators like Spectre and HSPICE, as well as the open-source simulator Ngspice. The tool uses separate TCL files for configuration parameters and template parameters, providing a structured and organized approach. Examples of library characterization are provided using the open-source FreePDK45 technology nodes.
 
-## Usage
-To run a simulation, specify the necessary parameters according to your simulation requirements. The parameters can be provided in a configuration file or directly on the command line, depending on the implementation of your simulation framework.
+## Quickstart (Python 3.13 required)
 
-### Example
+### Dependencies
+Runtime Python dependencies (from `pyproject.toml`):
+- `numpy>=1.26`
+
+### Option A: uv (recommended)
+This repository includes a `pyproject.toml` for uv. From the repo root:
+
+```
+uv python install 3.13
+uv sync
+uv run zlibboost -c examples/config_f45.tcl
+```
+
+### Option B: Python 3.13
+If you prefer a direct Python setup, install the minimal dependencies and run the module:
+
+```
+python3.13 -m pip install -U numpy
+python3.13 -m zlibboost.cli.main -c examples/config_f45.tcl
+```
+
+### Usage & Example
+To run a simulation, specify the necessary parameters according to your simulation requirements. The parameters can be provided in a configuration file or directly on the command line, depending on the implementation of your simulation framework.
 
 ```
 ❯ python -m zlibboost.cli.main -h                        
