@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zlibboost"
+version = "2.0.0"
+description = "An open-source framework for standard cell library characterization."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = { text = "Apache-2.0" }
+authors = [{ name = "ZlibBoost Team" }]
+dependencies = ["numpy>=1.26"]
+
+[project.scripts]
+zlibboost = "zlibboost.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["zlibboost*"]
+
+[tool.setuptools.package-data]
+"zlibboost.arc_generation" = ["*.pyc"]
+"zlibboost.arc_generation.extractors" = ["*.pyc"]
