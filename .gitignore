@@ -1,6 +1,2 @@
-__pychache__/
-*.pyc
-!zlibboost/arc_generation/*.pyc
-!zlibboost/arc_generation/extractors/*.pyc
-uv.lock
-zlibboost.egg-info/
+__pycache__/
+*.egg-info/
