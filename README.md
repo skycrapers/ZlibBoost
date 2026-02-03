@@ -8,6 +8,7 @@ ZlibBoost is an open-source framework designed for standard cell library charact
 ### Dependencies
 Runtime Python dependencies (from `pyproject.toml`):
 - `numpy>=1.26`
+- `ttable>=0.7.0`
 
 ### Option A: uv (recommended)
 This repository includes a `pyproject.toml` for uv. From the repo root:
@@ -22,7 +23,7 @@ uv run zlibboost -c examples/config_f45.tcl
 If you prefer a direct Python setup, install the minimal dependencies and run the module:
 
 ```
-python3.13 -m pip install -U numpy
+python3.13 -m pip install -U numpy ttable
 python3.13 -m zlibboost.cli.main -c examples/config_f45.tcl
 ```
 

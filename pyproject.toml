@@ -10,7 +10,10 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 license = { text = "BSD 3-Clause License with Commercial Use Restriction" }
 authors = [{ name = "ZlibBoost Team" }]
-dependencies = ["numpy>=1.26"]
+dependencies = [
+    "numpy>=1.26",
+    "ttable>=0.7.0",
+]
 
 [project.scripts]
 zlibboost = "zlibboost.cli.main:main"
