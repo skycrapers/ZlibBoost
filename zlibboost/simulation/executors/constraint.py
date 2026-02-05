@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 from zlibboost.simulation.optimizers.constraint import (
     ConstraintDeckOptimizer,
     OptimizationResult,
+    LatchConstraintDeckOptimizer,
     RemovalDeckOptimizer,
 )
 from zlibboost.simulation.parsers import (
@@ -19,6 +20,7 @@ from zlibboost.simulation.parsers import (
     MeasurementParserRegistry,
     MeasurementPayload,
 )
+from zlibboost.simulation.iteration import IterationTracker
 
 from .base import BaseSimulationExecutor
 
@@ -56,15 +58,17 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
         engine_dir = self._resolve_engine_workdir(deck_path, metadata, output_dir)
         engine_dir.mkdir(parents=True, exist_ok=True)
         engine_dir = engine_dir.resolve()
+        iter_tracker = IterationTracker()
 
         parser_available = self._parser_registry.get(self.engine) is not None
         if not parser_available:
-            self._invoke_engine(deck_path, engine_dir)
-            measurement = self._locate_measurement(deck_path, engine_dir)
+            iter_deck = self._stage_iterated_deck(deck_path, engine_dir, iter_tracker)
+            self._invoke_engine(iter_deck, engine_dir)
+            measurement = self._locate_measurement(iter_deck, engine_dir)
             artifacts: Dict[str, Any] = {}
             if measurement and measurement.exists():
                 artifacts["measurement_file"] = str(measurement)
-            arc_id = metadata.get("arc_id", deck_path.stem)
+            arc_id = metadata.get("arc_id") or IterationTracker.strip_prefix(deck_path.stem)
             result = self._build_result_payload(
                 metadata,
                 arc_id,
@@ -92,28 +96,37 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
                 engine_dir=engine_dir,
                 run_callback=lambda *_args, **_kwargs: MeasurementPayload(metrics={}),
                 reference_shift=initial_shift,
+                deck_namer=iter_tracker.tag,
             )
             initial_deck = shifter._write_adjusted_deck(initial_shift)
 
+        initial_deck = self._stage_iterated_deck(initial_deck, engine_dir, iter_tracker)
         initial_payload = self._simulate_single(initial_deck, metadata, engine_dir)
         if initial_payload is None:
+            arc_id = metadata.get("arc_id") or IterationTracker.strip_prefix(deck_path.stem)
             result = self._build_result(
                 deck_path=deck_path,
                 metadata=metadata,
                 payload=MeasurementPayload(metrics={}),
-                arc_id=metadata.get("arc_id", deck_path.stem),
+                arc_id=arc_id,
                 status="missing_measurement",
             )
         else:
             optimized_payload, optimization = self._maybe_optimize(
-                deck_path, metadata, engine_dir, initial_payload, initial_shift=initial_shift
+                deck_path,
+                metadata,
+                engine_dir,
+                initial_payload,
+                initial_shift=initial_shift,
+                iter_tracker=iter_tracker,
             )
             status = "completed" if optimized_payload.metrics else "missing_measurement"
+            arc_id = metadata.get("arc_id") or IterationTracker.strip_prefix(deck_path.stem)
             result = self._build_result(
                 deck_path=deck_path,
                 metadata=metadata,
                 payload=optimized_payload,
-                arc_id=metadata.get("arc_id", deck_path.stem),
+                arc_id=arc_id,
                 status=status,
                 optimization=optimization,
             )
@@ -174,7 +187,7 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
         output_dir: Path,
     ) -> Path:
         sim_type = metadata.get("sim_type", "constraint")
-        arc_id = metadata.get("arc_id", deck_path.stem)
+        arc_id = metadata.get("arc_id") or IterationTracker.strip_prefix(deck_path.stem)
         workdir = output_dir / sim_type / arc_id
         workdir.mkdir(parents=True, exist_ok=True)
         return workdir
@@ -249,7 +262,9 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
         payload: MeasurementPayload,
         *,
         initial_shift: float = 0.0,
+        iter_tracker: IterationTracker | None = None,
     ) -> tuple[MeasurementPayload, Optional[OptimizationResult]]:
+        tracker = iter_tracker or IterationTracker()
         sim_type = str(metadata.get("sim_type", "")).lower()
         timing_type = str(metadata.get("timing_type", "")).lower()
         if (
@@ -259,11 +274,30 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
             return payload, None
 
         run_callback = (
-            lambda adjusted, meta, shift: self._simulate_single(adjusted, meta, engine_dir)
+            lambda adjusted, meta, shift: self._simulate_single(
+                self._stage_iterated_deck(adjusted, engine_dir, tracker),
+                meta,
+                engine_dir,
+            )
             or MeasurementPayload(metrics={})
         )
 
-        if "removal" in timing_type:
+        # Latch setup/hold use a different optimization criterion (glitch+correctness)
+        # because DegradeDelay (EN->Q) can be negative/NaN when the latch is transparent.
+        is_latch = bool(metadata.get("cell_is_latch"))
+        if is_latch and sim_type in {"setup", "hold"}:
+            required = {"final_q", "glitch_peak_rise", "glitch_peak_fall"}
+            if not required.issubset(payload.metrics.keys()):
+                return payload, None
+            optimizer = LatchConstraintDeckOptimizer(
+                deck_path=deck_path,
+                metadata=metadata,
+                engine_dir=engine_dir,
+                run_callback=run_callback,
+                deck_namer=tracker.tag,
+            )
+            result = optimizer.run(payload, initial_shift=initial_shift)
+        elif "removal" in timing_type:
             if "half_tran_tend_q" not in payload.metrics:
                 return payload, None
             if (
@@ -276,6 +310,7 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
                 metadata=metadata,
                 engine_dir=engine_dir,
                 run_callback=run_callback,
+                deck_namer=tracker.tag,
             )
             result = optimizer.run(payload)
         else:
@@ -286,6 +321,7 @@ class ConstraintSimulationExecutor(BaseSimulationExecutor):
                 metadata=metadata,
                 engine_dir=engine_dir,
                 run_callback=run_callback,
+                deck_namer=tracker.tag,
             )
             result = optimizer.run(payload, initial_shift=initial_shift)
         metrics = dict(payload.metrics)

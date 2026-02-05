@@ -142,11 +142,13 @@ class MpwSpiceGenerator(BaseSpiceGenerator):
         if output_edge == TransitionDirection.RISE.value:
             # For rising edge output: measure high pulse width (rise->fall)
             lines.append(f".meas tran ZlibBoostDelay trig v({self.arc.pin}) val={threshold} "
-                         f"rise=last targ v({self.arc.related_pin}) val={threshold} fall=last")
+                         f"rise=last TD=half_tran_tend targ v({self.arc.related_pin}) val={threshold} "
+                         f"fall=last TD=half_tran_tend")
         else:
             # For falling edge output: measure low pulse width (fall->rise)
             lines.append(f".meas tran ZlibBoostDelay trig v({self.arc.related_pin}) val={threshold} "
-                         f"fall=last targ v({self.arc.pin}) val={threshold} rise=last")
+                         f"fall=last TD=half_tran_tend targ v({self.arc.pin}) val={threshold} "
+                         f"rise=last TD=half_tran_tend")
         lines.append("")
         return lines
 
@@ -270,7 +272,8 @@ class MpwSpiceGenerator(BaseSpiceGenerator):
 
             lines.append(
                 f".meas tran DegradeDelay trig v({main_pin}) val={threshold} "
-                f"{trigger_edge}=last targ v({target_pin}) val={threshold} {target_edge}=last"
+                f"{trigger_edge}=last TD=half_tran_tend "
+                f"targ v({target_pin}) val={threshold} {target_edge}=last TD=half_tran_tend"
             )
             lines.append(
                 f".meas tran HalfTranQ FIND v({target_pin}) AT=half_tran_tend"
@@ -384,12 +387,39 @@ class MpwSpiceGenerator(BaseSpiceGenerator):
             # Generate PWL based on output value (q_value) and pin type
             if pin_condition in data_pins:
                 # Data pins preload the expected Q value, then settle to the condition.
+                #
+                # NOTE (latch MPW):
+                # For latch enable MPW arcs, the enable pin can start in the
+                # *transparent* state (e.g. active-high enable with a low pulse).
+                # In that case, switching data during quarter_tran_tend would
+                # propagate through the latch before the measured opening edge,
+                # producing a negative/NaN DegradeDelay and preventing MPW
+                # optimization from finding a reference. Instead, switch data
+                # only after the enable has closed (half_tran_tend+<EN>_t1).
                 start_value = self.V_HIGH if q_value == self.V_HIGH else self.V_LOW
                 lines.append(f"+ 0 {start_value:.4f}")
+
+                latch_en = self.arc.pin if self.arc.pin in enable_pins else None
+                if self.cell.is_latch and latch_en:
+                    en_info = self.cell.pins.get(latch_en)
+                    open_when_high = not bool(getattr(en_info, "is_negative", False))
+                    starts_high = self.arc.pin_transition == TransitionDirection.FALL.value
+                    starts_open = starts_high if open_when_high else not starts_high
+
+                    if starts_open:
+                        # Wait until the enable's closing edge completes (t1),
+                        # then switch data while the latch is opaque.
+                        lines.append(
+                            f"+ 'half_tran_tend+{latch_en}_t1' {start_value:.4f}"
+                        )
+                        lines.append(
+                            f"+ 'half_tran_tend+{latch_en}_t1+1e-12' {pin_value:.4f})"
+                        )
+                        lines.append("")
+                        continue
+
                 lines.append(f"+ 'quarter_tran_tend' {start_value:.4f}")
-                lines.append(
-                    f"+ 'quarter_tran_tend+1e-12' {pin_value:.4f})"
-                )
+                lines.append(f"+ 'quarter_tran_tend+1e-12' {pin_value:.4f})")
                 lines.append("")
                 continue
 

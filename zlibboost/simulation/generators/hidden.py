@@ -164,9 +164,16 @@ class HiddenSpiceGenerator(BaseSpiceGenerator):
             lines.append(f"V{main_pin} {main_pin} 0 pwl(")
             
             presim_target = self._resolve_presim_target_voltage()
+            # Latch pre-simulation needs a non-overlap schedule:
+            # open -> set Q via D -> close EN -> recover D while opaque.
+            # Use 1/8 period for EN close and 3/8 period for data recovery.
+            is_latch_with_enable_condition = (
+                self.cell.is_latch and any(pin in self._merged_conditions for pin in enable_pins)
+            )
+            hold_end = "three_eighth_tran_tend" if is_latch_with_enable_condition else "quarter_tran_tend"
             if presim_target is not None:
                 lines.append(f"+ 0 {presim_target}")
-                lines.append(f"+ 'quarter_tran_tend' {presim_target}")
+                lines.append(f"+ '{hold_end}' {presim_target}")
             else:
                 # Legacy fallback: infer from any output constraint in merged conditions
                 if self._merged_conditions:
@@ -175,20 +182,25 @@ class HiddenSpiceGenerator(BaseSpiceGenerator):
                         if polarity and not polarity.is_negative:
                             if q_value == self.V_LOW:
                                 lines.append(f"+ 0 {self.V_LOW}")
-                                lines.append(f"+ 'quarter_tran_tend' {self.V_LOW}")
+                                lines.append(f"+ '{hold_end}' {self.V_LOW}")
                             else:
                                 lines.append(f"+ 0 {self.V_HIGH}")
-                                lines.append(f"+ 'quarter_tran_tend' {self.V_HIGH}")
+                                lines.append(f"+ '{hold_end}' {self.V_HIGH}")
                             break
                         elif polarity and polarity.is_negative:
                             if q_value == self.V_LOW:
                                 lines.append(f"+ 0 {self.V_LOW}")
-                                lines.append(f"+ 'quarter_tran_tend' {self.V_LOW}")
+                                lines.append(f"+ '{hold_end}' {self.V_LOW}")
                             else:
                                 lines.append(f"+ 0 {self.V_HIGH}")
-                                lines.append(f"+ 'quarter_tran_tend' {self.V_HIGH}")
+                                lines.append(f"+ '{hold_end}' {self.V_HIGH}")
                             break
-            lines.append(f"+ 'quarter_tran_tend+1e-12' '{main_pin}_v0'")
+            recover_time = (
+                "three_eighth_tran_tend+1e-12"
+                if is_latch_with_enable_condition
+                else "quarter_tran_tend+1e-12"
+            )
+            lines.append(f"+ '{recover_time}' '{main_pin}_v0'")
             lines.extend(self._write_pin_values(main_pin, t_count))
             
             # Generate condition PWL for data main pin
@@ -393,9 +405,20 @@ class HiddenSpiceGenerator(BaseSpiceGenerator):
                     lines.append("")
                 elif pin_condition in enable_pins:
                     lines.append(f"V{pin_condition} {pin_condition} 0 pwl(")
-                    lines.append(f"+ 0 {self.V_HIGH}")
-                    lines.append(f"+ 'quarter_tran_tend' {self.V_HIGH}")
-                    lines.append(f"+ 'quarter_tran_tend+1e-12' {pin_value:.4f})")
+                    pin_info = self.cell.pins.get(pin_condition)
+                    open_value = self.V_LOW if bool(getattr(pin_info, "is_negative", False)) else self.V_HIGH
+                    close_value = self.V_HIGH if bool(getattr(pin_info, "is_negative", False)) else self.V_LOW
+
+                    # Latch pre-sim: close enable at 1/8 period so that data can
+                    # recover later (3/8) while the latch is opaque.
+                    if self.cell.is_latch and pin_value == close_value:
+                        lines.append(f"+ 0 {open_value}")
+                        lines.append(f"+ 'eighth_tran_tend' {open_value}")
+                        lines.append(f"+ 'eighth_tran_tend+1e-12' {pin_value:.4f})")
+                    else:
+                        lines.append(f"+ 0 {open_value}")
+                        lines.append(f"+ 'quarter_tran_tend' {open_value}")
+                        lines.append(f"+ 'quarter_tran_tend+1e-12' {pin_value:.4f})")
                     lines.append("")
                 else:
                     lines.append(f"V{pin_condition} {pin_condition} 0 pwl(")
@@ -469,9 +492,20 @@ class HiddenSpiceGenerator(BaseSpiceGenerator):
                     lines.append("")
                 elif pin_condition in enable_pins:
                     lines.append(f"V{pin_condition} {pin_condition} 0 pwl(")
-                    lines.append(f"+ 0 {self.V_HIGH}")
-                    lines.append(f"+ 'quarter_tran_tend' {self.V_HIGH}")
-                    lines.append(f"+ 'quarter_tran_tend+1e-12' {pin_value:.4f})")
+                    pin_info = self.cell.pins.get(pin_condition)
+                    open_value = self.V_LOW if bool(getattr(pin_info, "is_negative", False)) else self.V_HIGH
+                    close_value = self.V_HIGH if bool(getattr(pin_info, "is_negative", False)) else self.V_LOW
+
+                    # Latch pre-sim: close enable early so data recovery can happen
+                    # later while the latch is opaque.
+                    if self.cell.is_latch and pin_value == close_value:
+                        lines.append(f"+ 0 {open_value}")
+                        lines.append(f"+ 'eighth_tran_tend' {open_value}")
+                        lines.append(f"+ 'eighth_tran_tend+1e-12' {pin_value:.4f})")
+                    else:
+                        lines.append(f"+ 0 {open_value}")
+                        lines.append(f"+ 'quarter_tran_tend' {open_value}")
+                        lines.append(f"+ 'quarter_tran_tend+1e-12' {pin_value:.4f})")
                     lines.append("")
                 else:
                     lines.append(f"V{pin_condition} {pin_condition} 0 pwl(")
@@ -1035,6 +1069,7 @@ class HiddenSpiceGenerator(BaseSpiceGenerator):
         lines.append(".param half_tran_tend=tran_tend/2")
         lines.append(".param quarter_tran_tend=tran_tend/4")
         lines.append(".param eighth_tran_tend=tran_tend/8")
+        lines.append(".param three_eighth_tran_tend=tran_tend*3/8")
         lines.append("")
         
         return lines

@@ -36,6 +36,7 @@ class MpwDeckOptimizer:
         tolerance: float = 0.05,
         degradation_tolerance: float = 0.1,
         max_iterations: int = 10,
+        deck_namer: Callable[[str], str] | None = None,
     ) -> None:
         self._deck_path = Path(deck_path)
         self._metadata = dict(metadata)
@@ -48,6 +49,7 @@ class MpwDeckOptimizer:
         self._tolerance = max(float(tolerance), 1e-3)
         self._degradation_tolerance = max(float(degradation_tolerance), 1e-3)
         self._max_iterations = max(int(max_iterations), 1)
+        self._deck_namer = deck_namer or (lambda name: name)
 
         self._base_width_s = self._extract_param(2)
         self._tail_delta_s = self._extract_param(3) - self._base_width_s
@@ -128,7 +130,7 @@ class MpwDeckOptimizer:
         content = self._replace_param(2, t2_value, self._base_content)
         content = self._replace_param(3, t3_value, content)
 
-        filename = f"{self._base_filename}_{width_seconds:.3e}.sp"
+        filename = self._deck_namer(f"{self._base_filename}_{width_seconds:.3e}.sp")
         deck_path = self._engine_dir / filename
         deck_path.write_text(content)
         return deck_path

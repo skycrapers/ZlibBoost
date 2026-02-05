@@ -243,9 +243,89 @@ class TemplateSerializer:
 class CellSerializer:
     """Convert Cell objects into legacy JSON nodes."""
 
+    _SIMPLE_INVERSION_PATTERN = re.compile(
+        r"^[!~]\s*\(?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)?\s*$"
+    )
+
     def __init__(self, template_serializer: TemplateSerializer | None = None) -> None:
         self._template_serializer = template_serializer or TemplateSerializer()
         self._timing_table_cache: Dict[Tuple[str, str, str, str, str], Dict[str, Any]] = {}
+
+    @staticmethod
+    def _normalize_state_variable_name(name: str) -> str:
+        """Return the base (non-complement) name for a sequential state variable."""
+        candidate = str(name or "").strip()
+        if candidate.endswith("_N"):
+            candidate = candidate[:-2]
+        return candidate
+
+    def _resolve_state_variables(self, cell: Cell) -> Tuple[str, str]:
+        """
+        Return the (state, state_complement) variable names for Liberty sequential groups.
+
+        Liberty requires two variables in ff()/latch(): one for the stored state and one
+        for its complement. We keep the internal state pin name when available (e.g.
+        Q_state) and derive the complement as <state>_N (e.g. Q_state_N). When no internal
+        pin exists (e.g. latch cells that do not model state explicitly), fall back to
+        <primary_output>_state.
+        """
+        internal_pins = [pin for pin in cell.get_internal_pins() if pin]
+        if internal_pins:
+            state = self._normalize_state_variable_name(internal_pins[0])
+        else:
+            outputs = list(cell.get_output_pins())
+            primary_output = "Q" if "Q" in outputs else (outputs[0] if outputs else "state")
+            state = f"{primary_output}_state"
+        return state, f"{state}_N"
+
+    @classmethod
+    def _serialize_sequential_output_function(cls, cell: Cell, expr: str) -> str:
+        """
+        Normalize sequential output functions to reference explicit state variables.
+
+        When a cell models internal state pins (e.g. Q_state), downstream Liberty should
+        reference that state variable and its explicit complement (<state>_N) instead of
+        using negation in-place.
+        """
+        if not expr:
+            return ""
+
+        # Only normalize for sequential cells; combinational outputs should keep their original expressions.
+        if not cell.is_sequential:
+            return expr
+
+        internal_state_pins = [pin for pin in cell.get_internal_pins() if pin]
+        if not internal_state_pins:
+            return expr
+
+        state_pin = internal_state_pins[0]
+        normalized = expr.strip()
+        if normalized == state_pin or normalized == f"({state_pin})":
+            return state_pin
+
+        state_n = f"{state_pin}_N"
+        if normalized == state_n or normalized == f"({state_n})":
+            return state_n
+
+        match = cls._SIMPLE_INVERSION_PATTERN.match(normalized)
+        if match and match.group(1) == state_pin:
+            return state_n
+        return expr
+
+    @staticmethod
+    def _serialize_async_timing_type(cell: Cell, related_pin: str, default: str = "clear") -> str:
+        """
+        Liberty expects async set/reset arcs to use timing_type {clear,preset}.
+
+        Internally we store both as TimingType.ASYNC; choose the proper Liberty
+        string based on pin categories.
+        """
+        if related_pin in set(cell.get_reset_pins()):
+            return "clear"
+        if related_pin in set(cell.get_set_pins()):
+            return "preset"
+        # Backward-compatible fallback (legacy json2lib did async->clear blindly).
+        return default
 
     @staticmethod
     def _constraint_candidate_stats(arc) -> Tuple[bool, int, int, Tuple[Tuple[str, str], ...]]:
@@ -347,11 +427,13 @@ class CellSerializer:
 
         latch_payload = self._build_latch_payload(cell)
         if latch_payload:
-            cell_node["latch(IQ,IQN)"] = latch_payload
+            state_var, state_var_n = self._resolve_state_variables(cell)
+            cell_node[f"latch({state_var},{state_var_n})"] = latch_payload
         else:
-            ff_payload = self._build_ff_payload(cell)
+            state_var, state_var_n = self._resolve_state_variables(cell)
+            ff_payload = self._build_ff_payload(cell, state_var)
             if ff_payload:
-                cell_node["ff(IQ,IQN)"] = ff_payload
+                cell_node[f"ff({state_var},{state_var_n})"] = ff_payload
 
         return cell_node
 
@@ -396,11 +478,9 @@ class CellSerializer:
             latch_payload["clear_preset_var1"] = "H"
             latch_payload["clear_preset_var2"] = "L"
 
-        latch_payload["power_down_function"] = "(!VDD) + (VSS)"
-
         return latch_payload
 
-    def _build_ff_payload(self, cell: Cell) -> Optional[Dict[str, str]]:
+    def _build_ff_payload(self, cell: Cell, state_var: str) -> Optional[Dict[str, str]]:
         """Build legacy ff/latch payload from cell pin categories."""
         if not (cell.is_sequential or cell.has_async_pins):
             return None
@@ -452,9 +532,9 @@ class CellSerializer:
         if preset_sync_pin and clear_sync_pin:
             next_state_expr = f"((!{preset_sync_pin} + {data_pin}) * {clear_sync_pin})"
         if enable_pin:
-            next_state_expr = f"(({enable_pin} * {data_pin}) + (!{enable_pin} * IQ))"
+            next_state_expr = f"(({enable_pin} * {data_pin}) + (!{enable_pin} * {state_var}))"
         if enable_pin and clear_sync_pin:
-            next_state_expr = f"(({enable_pin} * {data_pin}) + (!{enable_pin} * IQ) * {clear_sync_pin})"
+            next_state_expr = f"(({enable_pin} * {data_pin}) + (!{enable_pin} * {state_var}) * {clear_sync_pin})"
         if scan_enable_pin:
             next_state_expr = f"(({scan_in_pin} * {scan_enable_pin}) + (!{scan_enable_pin} * {data_pin}))"
         if scan_enable_pin and preset_sync_pin:
@@ -465,11 +545,11 @@ class CellSerializer:
             next_state_expr = f"(({scan_enable_pin} * {scan_in_pin}) + (!{scan_enable_pin}*((!{preset_sync_pin} + {data_pin}) * {clear_sync_pin})))"
         if enable_pin and scan_enable_pin:
             next_state_expr = (
-                f"(({scan_in_pin} * {scan_enable_pin}) + (!{scan_enable_pin} * (({enable_pin} * {data_pin}) + (!{enable_pin} * IQ))))"
+                f"(({scan_in_pin} * {scan_enable_pin}) + (!{scan_enable_pin} * (({enable_pin} * {data_pin}) + (!{enable_pin} * {state_var}))))"
             )
         if enable_pin and scan_enable_pin and clear_sync_pin:
             next_state_expr = (
-                f"(({scan_in_pin} * {scan_enable_pin}) + (!{scan_enable_pin} * (({enable_pin} * {data_pin}) + (!{enable_pin} * IQ)) * {clear_sync_pin}))"
+                f"(({scan_in_pin} * {scan_enable_pin}) + (!{scan_enable_pin} * (({enable_pin} * {data_pin}) + (!{enable_pin} * {state_var})) * {clear_sync_pin}))"
             )
 
         if next_state_expr:
@@ -479,8 +559,6 @@ class CellSerializer:
             ff_payload["clear_preset_var1"] = "L"
             ff_payload["clear_preset_var2"] = "L"
 
-        ff_payload["power_down_function"] = "(!VDD) + (VSS)"
-
         return ff_payload
 
     def _serialize_pin(self, cell: Cell, pin: PinInfo) -> Dict[str, Any]:
@@ -489,6 +567,9 @@ class CellSerializer:
             func = cell.get_function(pin.name)
             if func:
                 function_str = func.original_expr
+
+        if pin.direction in {"output", "inout"} and function_str:
+            function_str = self._serialize_sequential_output_function(cell, function_str)
 
         pin_node: Dict[str, Any] = {
             "direction": pin.direction,
@@ -521,6 +602,8 @@ class CellSerializer:
         pins_payload = cell_node["pins"]
         clock_pins = set(cell.get_clock_pins())
         control_pins = clock_pins | set(cell.get_enable_pins()) | set(cell.get_async_pins())
+        reset_pins = set(cell.get_reset_pins())
+        set_pins = set(cell.get_set_pins())
 
         for arc in cell.timing_arcs:
             if (
@@ -577,6 +660,15 @@ class CellSerializer:
                 continue
 
             is_min_pulse = arc.timing_type == TimingType.MIN_PULSE_WIDTH.value
+            export_timing_type = arc.timing_type
+            if arc.timing_type == TimingType.ASYNC.value:
+                # Map to Liberty-visible timing_type ("clear"/"preset") based on the control pin.
+                if arc.related_pin in reset_pins:
+                    export_timing_type = "clear"
+                elif arc.related_pin in set_pins:
+                    export_timing_type = "preset"
+                else:
+                    export_timing_type = "clear"
             # MPW arcs store their conditions in condition_dict (arc.condition is empty).
             formatted_when = (
                 self._format_when(arc.condition_string(cell=cell))
@@ -587,11 +679,11 @@ class CellSerializer:
             # 因为 CLK->Q 的延迟与 D 引脚状态无关，应合并为一个 timing 块
             is_clock_edge = arc.timing_type in ('rising_edge', 'falling_edge')
             group_when = "" if is_clock_edge else (formatted_when or "")
-            key = (arc.pin, arc.related_pin, arc.timing_type, group_when)
+            key = (arc.pin, arc.related_pin, export_timing_type, group_when)
             if key not in timing_groups:
                 entry = {
                     "related_pin": arc.related_pin,
-                    "timing_type": arc.timing_type,
+                    "timing_type": export_timing_type,
                 }
                 if not is_clock_edge and group_when:
                     entry["when"] = formatted_when

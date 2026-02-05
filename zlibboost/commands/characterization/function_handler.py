@@ -194,13 +194,16 @@ class FunctionHandler(BaseCommandHandler):
         当单元具备时钟和数据引脚但缺乏内部状态建模时，将输出函数提升为 next_state 表达式，
         以便顺序弧能够识别真正的时钟触发路径。
         """
-        # 仅在存在时钟引脚且尚未定义内部状态时处理
-        if not cell.get_clock_pins():
+        # Only promote for sequential controls (clocked FFs or enable-driven latches).
+        clock_pins = set(cell.get_clock_pins())
+        enable_pins = set(cell.get_enable_pins())
+        sequential_controls = clock_pins | enable_pins
+        if not sequential_controls:
             return functions
         # 若 data 分类缺失，退化为“除时钟外的全部输入”以保持 legacy 行为
         data_pins = set(cell.get_data_pins())
         if not data_pins:
-            fallback_inputs = set(cell.get_input_pins()) - set(cell.get_clock_pins())
+            fallback_inputs = set(cell.get_input_pins()) - sequential_controls
             if not fallback_inputs:
                 return functions
             data_pins = fallback_inputs

@@ -187,6 +187,38 @@ def build_jobs_for_library(
                     "timing_type": arc.timing_type,
                     "table_type": arc.table_type,
                 })
+                # Provide extra context for latch constraint optimization.
+                metadata["cell_is_latch"] = bool(getattr(cell, "is_latch", False))
+                try:
+                    output_conditions = arc.get_condition_outputs(cell)
+                except Exception:
+                    output_conditions = dict(getattr(arc, "output_condition_dict", {}) or {})
+
+                primary_output = None
+                output_pins = list(cell.get_output_pins() or [])
+                for out_pin in output_pins:
+                    if out_pin in output_conditions:
+                        primary_output = out_pin
+                        break
+                if primary_output is None and output_conditions:
+                    primary_output = sorted(output_conditions.keys())[0]
+                if primary_output is None and output_pins:
+                    primary_output = output_pins[0]
+
+                if primary_output:
+                    metadata["primary_output"] = primary_output
+                    if primary_output in output_conditions:
+                        metadata["primary_output_init"] = output_conditions[primary_output]
+                    try:
+                        from zlibboost.simulation.polarity import resolve_output_pin
+
+                        polarity = resolve_output_pin(cell, primary_output)
+                        metadata["primary_output_is_negative"] = bool(
+                            polarity is not None and polarity.is_negative
+                        )
+                    except Exception:
+                        # Keep metadata best-effort; latch optimizer will assume non-inverting.
+                        metadata["primary_output_is_negative"] = False
             metadata.update(analyzer_params)
             if mpw_bound is not None:
                 metadata.setdefault("mpw_search_bound", mpw_bound)
@@ -218,16 +250,40 @@ def _build_arc_prefix_map(cell, library_db) -> Dict[str, List[TimingArc]]:
 
 
 def _match_arc(filename_stem: str, arc_map: Dict[str, List[TimingArc]]) -> TimingArc | None:
+    """Return the best matching TimingArc for a generated deck filename stem.
+
+    Generated SPICE deck names are based on a *base filename* plus sweep suffixes
+    (e.g. ``_i1_0``/``_i2_0``). Some arcs legitimately produce base filenames that
+    are prefixes of other arcs (e.g. MPW arcs with/without condition vectors).
+
+    """
+
+    if not arc_map:
+        return None
+
+    matches: list[tuple[bool, int, str, list[TimingArc]]] = []
     for base, arcs in arc_map.items():
-        if filename_stem == base or filename_stem.startswith(f"{base}_"):
-            # If multiple arcs share prefix, return exact match on timing/table when encoded
-            if len(arcs) == 1:
-                return arcs[0]
-            for arc in arcs:
-                if arc.timing_type in filename_stem and arc.table_type in filename_stem:
-                    return arc
-            return arcs[0]
-    return None
+        if filename_stem == base:
+            matches.append((True, len(base), base, arcs))
+            continue
+        if filename_stem.startswith(f"{base}_"):
+            matches.append((False, len(base), base, arcs))
+
+    if not matches:
+        return None
+
+    # Sort: exact matches first, then longest base (most specific) first.
+    matches.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    _is_exact, _length, _base, arcs = matches[0]
+
+    # If multiple arcs share a base, return exact match on timing/table when encoded.
+    if len(arcs) == 1:
+        return arcs[0]
+
+    for arc in arcs:
+        if arc.timing_type in filename_stem and arc.table_type in filename_stem:
+            return arc
+    return arcs[0]
 
 
 # ----------------------------------------------------------------------

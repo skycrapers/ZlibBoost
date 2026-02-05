@@ -56,13 +56,18 @@ class MpwResultWriter(ResultWriter):
         except (TypeError, ValueError):
             logger.warning("Invalid MPW pulse width for %s: %s", result.job.job_id, value)
             return
+        hit_bound = False
+        bound_ns = None
         if bound_seconds:
             try:
                 bound_ns = float(bound_seconds) * 1e9
             except (TypeError, ValueError):
                 bound_ns = None
             if bound_ns and numeric_value >= 0.999 * bound_ns:
-                numeric_value = 0.0
+                # Hitting the configured bound means the optimizer couldn't shrink
+                # the pulse further. This is still meaningful (and should export),
+                # but we record the condition for debugging/config tuning.
+                hit_bound = True
         value = numeric_value
 
         i1 = self._resolve_index(metrics, "i1") or self._infer_index(
@@ -95,6 +100,11 @@ class MpwResultWriter(ResultWriter):
 
         vector[i1] = float(value)
         arc.set_mpw_values(vector)
+
+        if hit_bound:
+            arc.simulation_metadata["mpw_hit_bound"] = True
+            if bound_ns is not None:
+                arc.simulation_metadata["mpw_search_bound_ns"] = float(bound_ns)
 
         artifacts = result.data.get("artifacts") or {}
         measurement_file = artifacts.get("measurement_file")

@@ -51,6 +51,7 @@ class ConstraintDeckOptimizer:
         max_iterations: int = 60,
         cache_tolerance: float = DEFAULT_CACHE_TOLERANCE,
         window_ratio: float = DEFAULT_WINDOW_RATIO,
+        deck_namer: Callable[[str], str] | None = None,
     ) -> None:
         self._deck_path = Path(deck_path)
         self._metadata = dict(metadata)
@@ -63,6 +64,7 @@ class ConstraintDeckOptimizer:
         self._max_iterations = int(max_iterations)
         self._cache_tolerance = float(cache_tolerance)
         self._window_ratio = float(window_ratio)
+        self._deck_namer = deck_namer or (lambda name: name)
         self._base_content = self._deck_path.read_text()
         self._timing_type = str(metadata.get("timing_type", "")).lower()
         self._pin = str(metadata.get("pin", ""))
@@ -296,7 +298,9 @@ class ConstraintDeckOptimizer:
         else:
             adjusted_content = self._inject_time_shift(self._base_content, shift)
 
-        filename = f"{self._deck_path.stem}_shift_{self._format_shift_for_name(shift)}.sp"
+        filename = self._deck_namer(
+            f"{self._deck_path.stem}_shift_{self._format_shift_for_name(shift)}.sp"
+        )
         adjusted_path = self._engine_dir / filename
         adjusted_path.write_text(adjusted_content)
         return adjusted_path
@@ -374,6 +378,319 @@ class ConstraintDeckOptimizer:
     # NOTE: The legacy implementation does not apply any i1/i2-specific target-ratio offsets.
 
 
+class LatchConstraintDeckOptimizer:
+    """Optimizer for latch setup/hold constraints using a glitch + correctness criterion.
+
+    Motivation:
+    - For latches, the output transition can happen while EN is transparent, i.e.
+      before the closing edge. The classic "DegradeDelay (EN->Q)" metric can be
+      negative/NaN and the delay-degradation optimizer fails, leaving the
+      constraint stuck at the initial/reference shift (e.g. ~10ns).
+    - Instead, run a monotonic binary search over an effective time shift and
+      require:
+        1) The sampled output at the end of simulation matches the expected logic
+           value (correctness)
+        2) The output does not glitch after the closing edge (stability)
+    """
+
+    DEFAULT_SEARCH_LO = -10e-9
+    DEFAULT_SEARCH_HI = 10e-9
+    DEFAULT_TOLERANCE = 1e-12
+    DEFAULT_LOGIC_THRESHOLD_RATIO = 0.5
+    DEFAULT_GLITCH_THRESHOLD_RATIO = 0.1
+    DEFAULT_MAX_ITERATIONS = 80
+    DEFAULT_CACHE_TOLERANCE = 1e-13
+
+    def __init__(
+        self,
+        deck_path: Path,
+        metadata: Dict[str, object],
+        engine_dir: Path,
+        run_callback: Callable[[Path, Dict[str, object], float], MeasurementPayload],
+        *,
+        search_lo: float = DEFAULT_SEARCH_LO,
+        search_hi: float = DEFAULT_SEARCH_HI,
+        tolerance: float = DEFAULT_TOLERANCE,
+        logic_threshold_ratio: float = DEFAULT_LOGIC_THRESHOLD_RATIO,
+        glitch_threshold_ratio: float = DEFAULT_GLITCH_THRESHOLD_RATIO,
+        max_iterations: int = DEFAULT_MAX_ITERATIONS,
+        cache_tolerance: float = DEFAULT_CACHE_TOLERANCE,
+        deck_namer: Callable[[str], str] | None = None,
+    ) -> None:
+        self._deck_path = Path(deck_path)
+        self._metadata = dict(metadata)
+        self._engine_dir = Path(engine_dir)
+        self._run_callback = run_callback
+        self._search_lo = float(search_lo)
+        self._search_hi = float(search_hi)
+        self._tolerance = float(tolerance)
+        self._logic_threshold_ratio = float(logic_threshold_ratio)
+        self._glitch_threshold_ratio = float(glitch_threshold_ratio)
+        self._max_iterations = int(max_iterations)
+        self._cache_tolerance = float(cache_tolerance)
+        self._deck_namer = deck_namer or (lambda name: name)
+
+        self._base_content = self._deck_path.read_text()
+        self._timing_type = str(metadata.get("timing_type", "")).lower()
+        self._sim_type = str(metadata.get("sim_type", "")).lower()
+        self._pin = str(metadata.get("pin", ""))
+        self._related = str(metadata.get("related", ""))
+
+        self._vdd = self._extract_vdd(self._base_content) or self._fallback_vdd()
+
+    def run(self, initial_payload: MeasurementPayload, *, initial_shift: float = 0.0) -> OptimizationResult:
+        expected_final = self._expected_final_bit()
+        if expected_final is None:
+            return OptimizationResult(
+                payload=initial_payload,
+                best_shift=0.0,
+                iterations=0,
+                target=0.0,
+                converged=False,
+            )
+
+        logic_threshold = self._logic_threshold_ratio * self._vdd
+        glitch_threshold = self._glitch_threshold_ratio * self._vdd
+
+        cache: Dict[float, MeasurementPayload] = {}
+
+        def cache_get(shift: float) -> MeasurementPayload | None:
+            for cached_shift, payload in cache.items():
+                if abs(cached_shift - shift) <= self._cache_tolerance:
+                    return payload
+            return None
+
+        def evaluate(shift: float) -> MeasurementPayload | None:
+            cached = cache_get(shift)
+            if cached is not None:
+                return cached
+            payload = self._evaluate(shift)
+            if payload is None:
+                return None
+            cache[shift] = payload
+            return payload
+
+        initial_shift = float(initial_shift)
+
+        hi = self._search_hi
+        lo = self._search_lo
+
+        payload_hi: MeasurementPayload | None = None
+        if abs(initial_shift - hi) <= self._cache_tolerance:
+            payload_hi = initial_payload
+            cache[initial_shift] = initial_payload
+
+        if payload_hi is None:
+            payload_hi = evaluate(hi)
+        if payload_hi is None:
+            return OptimizationResult(
+                payload=initial_payload,
+                best_shift=0.0,
+                iterations=0,
+                target=glitch_threshold,
+                converged=False,
+            )
+
+        if not self._passes(payload_hi, expected_final, logic_threshold, glitch_threshold):
+            # Even the "safe" shift fails: return unoptimized payload.
+            return OptimizationResult(
+                payload=payload_hi,
+                best_shift=hi,
+                iterations=0,
+                target=glitch_threshold,
+                converged=False,
+            )
+
+        payload_lo = evaluate(lo)
+        if payload_lo is not None and self._passes(payload_lo, expected_final, logic_threshold, glitch_threshold):
+            # Boundary is below the search range.
+            return OptimizationResult(
+                payload=payload_lo,
+                best_shift=lo,
+                iterations=0,
+                target=glitch_threshold,
+                converged=True,
+            )
+
+        best_shift = hi
+        best_payload = payload_hi
+        iterations = 0
+
+        while iterations < self._max_iterations and (hi - lo) > self._tolerance:
+            mid = 0.5 * (lo + hi)
+            payload_mid = evaluate(mid)
+            iterations += 1
+            if payload_mid is None:
+                break
+
+            if self._passes(payload_mid, expected_final, logic_threshold, glitch_threshold):
+                best_shift = mid
+                best_payload = payload_mid
+                hi = mid
+            else:
+                lo = mid
+
+        converged = (hi - lo) <= self._tolerance
+        return OptimizationResult(
+            payload=best_payload,
+            best_shift=best_shift,
+            iterations=iterations,
+            target=glitch_threshold,
+            converged=converged,
+        )
+
+    def _expected_final_bit(self) -> str | None:
+        """Return expected output bit at end of sim (for the primary output).
+
+        For latch constraints we can infer the captured data value from:
+        - sim_type (setup captures *after* the data transition; hold captures *before*)
+        - table_type (rise_constraint/fall_constraint => data rise/fall)
+        Then map through output polarity (Q vs QN).
+        """
+
+        table_type = str(self._metadata.get("table_type", "")).lower()
+        if "rise_constraint" in table_type:
+            data_edge = "rise"
+        elif "fall_constraint" in table_type:
+            data_edge = "fall"
+        else:
+            return None
+
+        if self._sim_type == "setup":
+            captured_data = "1" if data_edge == "rise" else "0"
+        elif self._sim_type == "hold":
+            captured_data = "0" if data_edge == "rise" else "1"
+        else:
+            return None
+
+        is_negative = bool(self._metadata.get("primary_output_is_negative"))
+        if not is_negative:
+            return captured_data
+        return "0" if captured_data == "1" else "1"
+
+    @staticmethod
+    def _numeric(metric: object | None) -> float | None:
+        if metric is None:
+            return None
+        try:
+            value = float(metric)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(value):
+            return None
+        return value
+
+    def _passes(
+        self,
+        payload: MeasurementPayload,
+        expected_final: str,
+        logic_threshold: float,
+        glitch_threshold: float,
+    ) -> bool:
+        final_q = self._numeric(payload.metrics.get("final_q"))
+        if final_q is None:
+            return False
+
+        if expected_final == "1":
+            if final_q < logic_threshold:
+                return False
+        else:
+            if final_q > logic_threshold:
+                return False
+
+        peak_hi = self._numeric(payload.metrics.get("glitch_peak_rise"))
+        peak_lo = self._numeric(payload.metrics.get("glitch_peak_fall"))
+        if peak_hi is None or peak_lo is None:
+            return False
+
+        abs_diff = max(abs(peak_hi - final_q), abs(peak_lo - final_q))
+        return abs_diff <= glitch_threshold
+
+    def _evaluate(self, shift: float) -> MeasurementPayload | None:
+        adjusted = self._write_adjusted_deck(shift)
+        payload = self._run_callback(adjusted, self._metadata, shift)
+        if not payload or not payload.metrics:
+            return None
+        required = ("constraint", "final_q", "glitch_peak_rise", "glitch_peak_fall")
+        for key in required:
+            if key not in payload.metrics:
+                return None
+        return payload
+
+    def _write_adjusted_deck(self, shift: float) -> Path:
+        if abs(shift) < 1e-18:
+            adjusted_content = self._base_content
+        else:
+            adjusted_content = self._inject_time_shift(self._base_content, shift)
+
+        filename = self._deck_namer(f"{self._deck_path.stem}_shift_{shift:.3e}.sp")
+        adjusted_path = self._engine_dir / filename
+        adjusted_path.write_text(adjusted_content)
+        return adjusted_path
+
+    def _inject_time_shift(self, content: str, shift: float) -> str:
+        target_pin = self._resolve_target_pin()
+        if not target_pin or abs(shift) < 1e-18:
+            return content
+
+        pin_to_shift, actual_shift = self._resolve_shift_pin(target_pin, shift)
+        if not pin_to_shift:
+            return content
+
+        pattern = re.compile(rf"(half_tran_tend\+{re.escape(pin_to_shift)}_t\d+)")
+        shift_str = self._format_shift(actual_shift)
+        return pattern.sub(lambda match: f"{match.group(1)}{shift_str}", content)
+
+    def _resolve_shift_pin(self, target_pin: str, shift: float) -> tuple[str | None, float]:
+        if shift >= 0:
+            return target_pin, shift
+
+        alternate = None
+        if target_pin == self._pin:
+            alternate = self._related
+        elif target_pin == self._related:
+            alternate = self._pin
+
+        if not alternate:
+            return target_pin, shift
+
+        return alternate, -shift
+
+    def _resolve_target_pin(self) -> str:
+        if "hold" in self._timing_type:
+            return self._pin
+        return self._related
+
+    @staticmethod
+    def _format_shift(value: float) -> str:
+        if value >= 0:
+            return f"+{value:.12g}"
+        return f"{value:.12g}"
+
+    @staticmethod
+    def _extract_vdd(content: str) -> float | None:
+        match = re.search(r"^VVDD\s+\S+\s+0\s+([0-9.eE+-]+)\s*$", content, re.MULTILINE)
+        if not match:
+            return None
+        try:
+            value = float(match.group(1))
+        except ValueError:
+            return None
+        if not math.isfinite(value) or value <= 0:
+            return None
+        return value
+
+    def _fallback_vdd(self) -> float:
+        candidate = self._metadata.get("voltage")
+        if candidate is None:
+            return 1.0
+        try:
+            value = float(candidate)
+        except (TypeError, ValueError):
+            return 1.0
+        return value if math.isfinite(value) and value > 0 else 1.0
+
+
 class RemovalDeckOptimizer:
     """Legacy-aligned optimizer for removal constraints.
 
@@ -399,6 +716,7 @@ class RemovalDeckOptimizer:
         tolerance: float = DEFAULT_TOLERANCE,
         threshold_ratio: float = DEFAULT_THRESHOLD_RATIO,
         max_iterations: int = 80,
+        deck_namer: Callable[[str], str] | None = None,
     ) -> None:
         self._deck_path = Path(deck_path)
         self._metadata = dict(metadata)
@@ -409,6 +727,7 @@ class RemovalDeckOptimizer:
         self._tolerance = float(tolerance)
         self._threshold_ratio = float(threshold_ratio)
         self._max_iterations = int(max_iterations)
+        self._deck_namer = deck_namer or (lambda name: name)
 
         self._base_content = self._deck_path.read_text()
         self._timing_type = str(metadata.get("timing_type", "")).lower()
@@ -477,7 +796,7 @@ class RemovalDeckOptimizer:
         else:
             adjusted_content = self._inject_time_shift(self._base_content, shift)
 
-        filename = f"{self._deck_path.stem}_shift_{shift:.3e}.sp"
+        filename = self._deck_namer(f"{self._deck_path.stem}_shift_{shift:.3e}.sp")
         adjusted_path = self._engine_dir / filename
         adjusted_path.write_text(adjusted_content)
         return adjusted_path
@@ -530,7 +849,9 @@ class RemovalDeckOptimizer:
     def _glitch_abs_diff(payload: MeasurementPayload) -> Optional[float]:
         if payload is None or not payload.metrics:
             return None
-        half = payload.metrics.get("half_tran_tend_q")
+        half = payload.metrics.get("final_q")
+        if half is None:
+            half = payload.metrics.get("half_tran_tend_q")
         peak = payload.metrics.get("glitch_peak_rise")
         if peak is None:
             peak = payload.metrics.get("glitch_peak_fall")

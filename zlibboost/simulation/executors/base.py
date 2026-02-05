@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from zlibboost.core.logger import get_logger
+from zlibboost.simulation.iteration import IterationTracker
 
 logger = get_logger(__name__)
 
@@ -142,6 +143,19 @@ class BaseSimulationExecutor:
             "workdir": str(engine_dir),
         }
         return [part.format(**substitutions) for part in template]
+
+    @staticmethod
+    def _stage_iterated_deck(
+        deck_path: Path,
+        engine_dir: Path,
+        tracker: IterationTracker,
+    ) -> Path:
+        staged_name = tracker.tag(Path(deck_path).name)
+        staged_path = Path(engine_dir) / staged_name
+        if staged_path.resolve() == Path(deck_path).resolve():
+            return Path(deck_path)
+        staged_path.write_text(Path(deck_path).read_text())
+        return staged_path
 
     # ------------------------------------------------------------------
     # Result helpers

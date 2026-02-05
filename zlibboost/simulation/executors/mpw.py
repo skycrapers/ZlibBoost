@@ -17,6 +17,7 @@ from zlibboost.simulation.parsers import (
     MpwHspiceParser,
     MeasurementPayload,
 )
+from zlibboost.simulation.iteration import IterationTracker
 
 from .base import BaseSimulationExecutor
 
@@ -50,18 +51,20 @@ class MpwSimulationExecutor(BaseSimulationExecutor):
         engine_dir = self._resolve_engine_workdir(deck_path, metadata, output_dir)
         engine_dir.mkdir(parents=True, exist_ok=True)
         engine_dir = engine_dir.resolve()
+        iter_tracker = IterationTracker()
 
         parser_available = self._parser_registry.get(self.engine) is not None
         if not parser_available:
             try:
-                self._invoke_engine(deck_path, engine_dir)
+                iter_deck = self._stage_iterated_deck(deck_path, engine_dir, iter_tracker)
+                self._invoke_engine(iter_deck, engine_dir)
             except subprocess.CalledProcessError:
                 pass
-            measurement = self._locate_measurement(deck_path, engine_dir)
+            measurement = self._locate_measurement(iter_deck, engine_dir)
             artifacts: Dict[str, Any] = {}
             if measurement and measurement.exists():
                 artifacts["measurement_file"] = str(measurement)
-            arc_id = metadata.get("arc_id", deck_path.stem)
+            arc_id = metadata.get("arc_id") or IterationTracker.strip_prefix(deck_path.stem)
             result = self._build_result_payload(
                 metadata,
                 arc_id,
@@ -77,27 +80,30 @@ class MpwSimulationExecutor(BaseSimulationExecutor):
             self.postprocess(result, output_dir, engine_dir)
             return result
 
-        initial_payload = self._simulate_single(deck_path, metadata, engine_dir)
+        initial_deck = self._stage_iterated_deck(deck_path, engine_dir, iter_tracker)
+        initial_payload = self._simulate_single(initial_deck, metadata, engine_dir)
         if initial_payload is None:
             payload = MeasurementPayload(metrics={})
+            arc_id = metadata.get("arc_id") or IterationTracker.strip_prefix(deck_path.stem)
             result = self._build_result(
                 deck_path=deck_path,
                 metadata=metadata,
                 payload=payload,
-                arc_id=metadata.get("arc_id", deck_path.stem),
+                arc_id=arc_id,
                 status="missing_measurement",
                 optimization=None,
             )
         else:
             optimized_payload, optimization = self._maybe_optimize(
-                deck_path, metadata, engine_dir, initial_payload
+                deck_path, metadata, engine_dir, initial_payload, iter_tracker=iter_tracker
             )
             status = "completed" if optimized_payload.metrics else "missing_measurement"
+            arc_id = metadata.get("arc_id") or IterationTracker.strip_prefix(deck_path.stem)
             result = self._build_result(
                 deck_path=deck_path,
                 metadata=metadata,
                 payload=optimized_payload,
-                arc_id=metadata.get("arc_id", deck_path.stem),
+                arc_id=arc_id,
                 status=status,
                 optimization=optimization,
             )
@@ -124,7 +130,7 @@ class MpwSimulationExecutor(BaseSimulationExecutor):
         output_dir: Path,
     ) -> Path:
         sim_type = metadata.get("sim_type", "mpw")
-        arc_id = metadata.get("arc_id", deck_path.stem)
+        arc_id = metadata.get("arc_id") or IterationTracker.strip_prefix(deck_path.stem)
         workdir = output_dir / sim_type / arc_id
         workdir.mkdir(parents=True, exist_ok=True)
         return workdir
@@ -183,16 +189,22 @@ class MpwSimulationExecutor(BaseSimulationExecutor):
         metadata: Dict[str, Any],
         engine_dir: Path,
         payload: MeasurementPayload,
+        *,
+        iter_tracker: IterationTracker | None = None,
     ) -> Tuple[MeasurementPayload, Optional[MpwOptimizationResult]]:
+        tracker = iter_tracker or IterationTracker()
         try:
             optimizer = MpwDeckOptimizer(
                 deck_path=deck_path,
                 metadata=metadata,
                 engine_dir=engine_dir,
                 run_callback=lambda adjusted, meta, width: self._simulate_single(
-                    adjusted, meta, engine_dir
+                    self._stage_iterated_deck(adjusted, engine_dir, tracker),
+                    meta,
+                    engine_dir,
                 )
                 or MeasurementPayload(metrics={}),
+                deck_namer=tracker.tag,
             )
         except (ValueError, OSError) as exc:
             logger.debug("Skipping MPW optimization for %s: %s", deck_path, exc)

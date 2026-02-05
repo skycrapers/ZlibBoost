@@ -23,6 +23,7 @@ class ConstraintSpectreParser(MeasurementParser):
         "glitch_peak_rise": "glitch_peak_rise",
         "glitch_peak_fall": "glitch_peak_fall",
         "half_tran_tend_q": "half_tran_tend_q",
+        "final_q": "final_q",
     }
 
     def parse(

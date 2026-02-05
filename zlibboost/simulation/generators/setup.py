@@ -225,6 +225,37 @@ class SetupSpiceGenerator(BaseSpiceGenerator):
         if primary_output is None:
             return lines
 
+        # Latch setup/hold characterization:
+        # - For latches, Q often transitions while EN is transparent, i.e. *before*
+        #   the closing edge. The classic "DegradeDelay (EN->Q)" metric can become
+        #   negative/NaN and breaks the delay-degradation optimizer.
+        # - Instead, measure output stability after the closing edge using a
+        #   glitch metric window that starts after the related pin transition.
+        # The constraint executor will use a latch-specific optimizer when these
+        # latch-only measurements are present.
+        if getattr(self.cell, "is_latch", False) and self.sim_type in {"setup", "hold", "removal"}:
+            t_count = len(getattr(self.constraint_waveform, "index_2", [])) - 1
+            if t_count < 0:
+                t_count = 0
+
+            # Spectre/HSPICE require quoting arithmetic expressions in .meas
+            # FROM/TO/AT. Without quotes, measurements silently return NaN.
+            close_at = f"'half_tran_tend+{related_pin}_t{t_count}'"
+            lines.append(
+                f".meas tran glitch_peak_rise MAX v({primary_output}) FROM={close_at} TO=tran_tend"
+            )
+            lines.append(
+                f".meas tran glitch_peak_fall MIN v({primary_output}) FROM={close_at} TO=tran_tend"
+            )
+            lines.append(
+                f".meas tran half_tran_tend_q FIND v({primary_output}) AT={close_at}"
+            )
+            lines.append(
+                f".meas tran final_q FIND v({primary_output}) AT=tran_tend"
+            )
+            lines.append("")
+            return lines
+
         polarity = resolve_output_pin(self.cell, primary_output)
         is_negative_output = bool(polarity is not None and polarity.is_negative)
 
@@ -291,16 +322,49 @@ class SetupSpiceGenerator(BaseSpiceGenerator):
         # Get pin names
         related_pin = self.arc.related_pin  # Used in related PWL generation
         timing_type = self.arc.timing_type.lower()
+        is_recovery = "recovery" in timing_type and self.sim_type == "recovery"
+        enable_pins = self.cell.get_enable_pins()
 
         # Generate PWL for clock pin (related pin)
         lines.append(f"V{related_pin} {related_pin} 0  pwl(")
 
         # Standard setup constraint pattern for clock (matches legacy lines 352-358)
         if ('setup' in timing_type or 'hold' in timing_type or 'recovery' in timing_type or 'removal' in timing_type) and 'non_seq' not in timing_type:
-            lines.append(f"+ '{related_pin}_t0' '{related_pin}_v0'")
-            lines.append(f"+ '{related_pin}_t{t_count}' '{related_pin}_v{t_count}'")
-            lines.append(f"+ 'quarter_tran_tend' '{related_pin}_v{t_count}'")
-            lines.append(f"+ 'quarter_tran_tend+{related_pin}_t{t_count}' '{related_pin}_v0'")
+            if is_recovery:
+                related_edge = (self.arc.related_transition or "rise").lower()
+                related_edge = "rise" if related_edge.startswith("r") else "fall"
+                if getattr(self.cell, "is_latch", False) and related_pin in enable_pins:
+                    # Latch recovery: keep enable closed before half_tran_tend.
+                    pre_half = self.V_LOW if related_edge == "rise" else self.V_HIGH
+                else:
+                    # Flip-flop recovery: keep clock at the non-triggering level.
+                    pre_half = self.V_LOW if related_edge == "rise" else self.V_HIGH
+                lines.append(f"+ 0 {pre_half:.4f}")
+                lines.append(f"+ 'half_tran_tend-1e-12' {pre_half:.4f}")
+            elif (
+                getattr(self.cell, "is_latch", False)
+                and related_pin in enable_pins
+                and self.sim_type in {"setup", "hold", "removal"}
+            ):
+                # Latch pre-sim schedule:
+                # - keep EN open long enough for Q to settle via D
+                # - close EN at 1/8 period
+                # - keep EN closed while data recovers at 3/8 period
+                # - re-open EN after data recovery so the measured edge at half
+                #   starts from the correct initial level.
+                lines.append(f"+ 0 '{related_pin}_v0'")
+                lines.append(f"+ 'eighth_tran_tend' '{related_pin}_v0'")
+                lines.append(
+                    f"+ 'eighth_tran_tend+{related_pin}_t{t_count}' '{related_pin}_v{t_count}'"
+                )
+                lines.append(f"+ 'three_eighth_tran_tend' '{related_pin}_v{t_count}'")
+                # Open after data recovery (which happens at three_eighth_tran_tend+1e-12).
+                lines.append(f"+ 'three_eighth_tran_tend+2e-12' '{related_pin}_v0'")
+            else:
+                lines.append(f"+ '{related_pin}_t0' '{related_pin}_v0'")
+                lines.append(f"+ '{related_pin}_t{t_count}' '{related_pin}_v{t_count}'")
+                lines.append(f"+ 'quarter_tran_tend' '{related_pin}_v{t_count}'")
+                lines.append(f"+ 'quarter_tran_tend+{related_pin}_t{t_count}' '{related_pin}_v0'")
 
         # Non-sequential setup/hold pattern (matches legacy lines 360-380)
         elif 'non_seq_setup' in timing_type or 'non_seq_hold' in timing_type:
@@ -369,6 +433,8 @@ class SetupSpiceGenerator(BaseSpiceGenerator):
 
         # Get pin names
         main_pin = self.arc.pin
+        timing_type = self.arc.timing_type.lower()
+        is_recovery_like = "recovery" in timing_type or "removal" in timing_type
 
         # Get t_count from constraint waveform
         t_count = len(self.constraint_waveform.index_2) - 1
@@ -509,6 +575,11 @@ class SetupSpiceGenerator(BaseSpiceGenerator):
                 pin_value_negative = self.V_LOW if pin_state == '1' else self.V_HIGH
                 q_value = self.V_LOW  # Default initial value
                 polarity = resolve_output_pin(self.cell, pin_condition)
+                if is_recovery_like and pin_condition in async_pins and pin_condition != main_pin:
+                    # Async complement pins: keep inactive before half_tran_tend in recovery/removal.
+                    lines.append(f"V{pin_condition} {pin_condition} 0 pwl(")
+                    lines.append(f"+ 0 {pin_value_positive:.4f})\n")
+                    continue
                 # Different handling based on pin condition categories
                 if polarity and not polarity.is_negative:
                     # Positive output condition pin handling
@@ -547,6 +618,11 @@ class SetupSpiceGenerator(BaseSpiceGenerator):
                 pin_value_negative = self.V_LOW if pin_state == '1' else self.V_HIGH
                 q_value = self.V_LOW  # Default initial value
                 polarity = resolve_output_pin(self.cell, pin_condition)
+                if is_recovery_like and pin_condition in async_pins and pin_condition != main_pin:
+                    # Async complement pins: keep inactive before half_tran_tend in recovery/removal.
+                    lines.append(f"V{pin_condition} {pin_condition} 0 pwl(")
+                    lines.append(f"+ 0 {pin_value_positive:.4f})\n")
+                    continue
                 # Different handling based on pin condition categories
                 if polarity and not polarity.is_negative:
                     # Positive output condition pin handling
@@ -756,11 +832,24 @@ class SetupSpiceGenerator(BaseSpiceGenerator):
 
         hold_value = self.V_HIGH if start_high else self.V_LOW
 
+        hold_end = "quarter_tran_tend"
+        recover_time = f"quarter_tran_tend+{pin}_t{t_count}"
+        if (
+            getattr(self.cell, "is_latch", False)
+            and self.sim_type in {"setup", "hold"}
+            and self.arc.related_pin in self.cell.get_enable_pins()
+            and pin in self.cell.get_data_pins()
+        ):
+            # Latch pre-sim: keep data stable while EN is open, close EN at 1/8,
+            # then recover data at 3/8 while the latch is opaque.
+            hold_end = "three_eighth_tran_tend"
+            recover_time = "three_eighth_tran_tend+1e-12"
+
         driver_lines = [
             f"V{pin} {pin} 0 pwl(",
             f"+ 0 {hold_value:.6f}",
-            f"+ 'quarter_tran_tend' {hold_value:.6f}",
-            f"+ 'quarter_tran_tend+{pin}_t{t_count}' '{pin}_v0'",
+            f"+ '{hold_end}' {hold_value:.6f}",
+            f"+ '{recover_time}' '{pin}_v0'",
         ]
         driver_lines.extend(self._write_pin_values(pin, t_count))
         return driver_lines
@@ -779,7 +868,9 @@ class SetupSpiceGenerator(BaseSpiceGenerator):
         
         # Derived timing parameters
         lines.append(".param half_tran_tend=tran_tend/2")
-        lines.append(".param quarter_tran_tend=tran_tend/4\n")
+        lines.append(".param quarter_tran_tend=tran_tend/4")
+        lines.append(".param eighth_tran_tend=tran_tend/8")
+        lines.append(".param three_eighth_tran_tend=tran_tend*3/8\n")
         
         return lines
     

@@ -3,6 +3,7 @@ import json
 import sys
 import re
 from collections import OrderedDict
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
 TEMPLATE_WITH_SIZE_PATTERN = re.compile(r"_\d+x\d+(?:_|$)")
 
@@ -14,13 +15,52 @@ class Json2Liberty:
         """Initialize"""
         pass
 
+    _LUT_VALUE_DECIMALS = 8
+
+    @staticmethod
+    def _space_parens(value: str) -> str:
+        if not value:
+            return value
+        value = re.sub(r"\((?=[^)\s])", "( ", value)
+        value = re.sub(r"(?<=[^(\s])\)", " )", value)
+        return value
+
     def _format_value(self, value):
         """Format values, handle numbers and strings"""
         if isinstance(value, (int, float)):
             return str(value)
         if isinstance(value, list):
             return ",".join(map(str, value))
+        if isinstance(value, str):
+            value = self._space_parens(value)
         return f'"{value}"'
+
+    @classmethod
+    def _format_lut_number(cls, value):
+        """Format LUT numeric entries with bounded decimal precision (truncate)."""
+        digits = cls._LUT_VALUE_DECIMALS
+
+        def _truncate_decimal(dec: Decimal) -> str:
+            if not dec.is_finite():
+                return str(dec)
+            quant = Decimal("1." + ("0" * digits))
+            try:
+                truncated = dec.quantize(quant, rounding=ROUND_DOWN)
+            except InvalidOperation:
+                return str(dec)
+            return f"{truncated:.{digits}f}"
+
+        if isinstance(value, (int, float)):
+            return _truncate_decimal(Decimal(str(value)))
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return value
+            try:
+                return _truncate_decimal(Decimal(stripped))
+            except InvalidOperation:
+                return value
+        return str(value)
 
     # def _write_timing_attributes(self, fh, indent, timing_data):
     #     """Write timing attributes"""
@@ -39,35 +79,41 @@ class Json2Liberty:
         # Write index
         if "index_1" in value_data:
             fh.write(
-                f'{indent_str}  index_1("{",".join(map(str, value_data["index_1"]))}");\n'
+                f'{indent_str}  index_1 ("{", ".join(map(str, value_data["index_1"]))}");\n'
             )
         if "index_2" in value_data:
             fh.write(
-                f'{indent_str}  index_2("{",".join(map(str, value_data["index_2"]))}");\n'
+                f'{indent_str}  index_2 ("{", ".join(map(str, value_data["index_2"]))}");\n'
             )
 
         # Write values
         if "values" in value_data:
-            fh.write(f"{indent_str}  values(\n")
             values = value_data["values"]
-            if isinstance(values, (int, float)):
-                # Single value
-                fh.write(f'{indent_str}    "{values}"\n')
-            elif isinstance(values, list):
-                if not isinstance(values[0], list):
-                    # One-dimensional array
-                    values_str = ",".join(map(str, values))
-                    fh.write(f'{indent_str}    "{values_str}"\n')
-                else:
-                    # Two-dimensional array
-                    for i, row in enumerate(values):
-                        row_str = ",".join(map(str, row))
-                        fh.write(f'{indent_str}    "{row_str}"')
-                        if i < len(values) - 1:
-                            fh.write(",\\\n")
-                        else:
-                            fh.write("\n")
-            fh.write(f"{indent_str}  );\n")
+            if isinstance(values, list):
+                fh.write(f"{indent_str}  values ( \\\n")
+                if values:
+                    if not isinstance(values[0], list):
+                        # One-dimensional array
+                        values_str = ", ".join(
+                            self._format_lut_number(v) for v in values
+                        )
+                        fh.write(f'{indent_str}    "{values_str}" \\\n')
+                    else:
+                        # Two-dimensional array
+                        for i, row in enumerate(values):
+                            row_str = ", ".join(
+                                self._format_lut_number(v) for v in row
+                            )
+                            if i < len(values) - 1:
+                                fh.write(f'{indent_str}    "{row_str}", \\\n')
+                            else:
+                                fh.write(f'{indent_str}    "{row_str}" \\\n')
+                fh.write(f"{indent_str}  );\n")
+            else:
+                fh.write(f"{indent_str}  values (\n")
+                if isinstance(values, (int, float)):
+                    fh.write(f'{indent_str}    "{self._format_lut_number(values)}"\n')
+                fh.write(f"{indent_str}  );\n")
 
     def _get_template_size(self, value_data):
         """Calculate template size"""
@@ -89,7 +135,7 @@ class Json2Liberty:
     def _write_timing(self, fh, indent, timing_data):
         """Write timing group data"""
         indent_str = " " * indent
-        fh.write(f"{indent_str}timing() {{\n")
+        fh.write(f"{indent_str}timing () {{\n")
 
         # Modify the when condition check, exclude empty or "()" cases
         if (
@@ -97,13 +143,17 @@ class Json2Liberty:
             and timing_data["when"]
             and timing_data["when"] != "()"
         ):
-            fh.write(f'{indent_str}  when : "{timing_data["when"]}";\n')
+            fh.write(f"{indent_str}  when : {self._format_value(timing_data['when'])};\n")
 
         if "related_pin" in timing_data:
-            fh.write(f'{indent_str}  related_pin : "{timing_data["related_pin"]}";\n')
+            fh.write(
+                f"{indent_str}  related_pin : {self._format_value(timing_data['related_pin'])};\n"
+            )
 
         if "timing_type" in timing_data:
-            fh.write(f'{indent_str}  timing_type : "{timing_data["timing_type"]}";\n')
+            fh.write(
+                f"{indent_str}  timing_type : {self._format_value(timing_data['timing_type'])};\n"
+            )
 
         # Write timing tables, only when values are not empty
         for key, value in timing_data.items():
@@ -115,7 +165,7 @@ class Json2Liberty:
                     and ("index_1" in value or "values" in value)
                 ):
                     template_ref = self._resolve_template_name(value["template"], value)
-                    fh.write(f"{indent_str}  {key}({template_ref}) {{\n")
+                    fh.write(f"{indent_str}  {key} ({template_ref}) {{\n")
                     self._write_value_table(fh, indent + 2, value)
                     fh.write(f"{indent_str}  }}\n")
             elif key in ["rise_constraint", "fall_constraint"]:
@@ -126,7 +176,7 @@ class Json2Liberty:
                     and ("index_1" in value or "values" in value)
                 ):
                     template_ref = self._resolve_template_name(value["template"], value)
-                    fh.write(f"{indent_str}  {key}({template_ref}) {{\n")
+                    fh.write(f"{indent_str}  {key} ({template_ref}) {{\n")
                     self._write_value_table(fh, indent + 2, value)
                     fh.write(f"{indent_str}  }}\n")
 
@@ -135,21 +185,23 @@ class Json2Liberty:
     def _write_power(self, fh, indent, power_data):
         """Write power data"""
         indent_str = " " * indent
-        fh.write(f"{indent_str}internal_power() {{\n")
+        fh.write(f"{indent_str}internal_power () {{\n")
 
         # Write basic attributes - skip empty or placeholder values
         related_pin = power_data.get("related_pin", "")
         if related_pin and related_pin != "-":
-            fh.write(f'{indent_str}  related_pin : "{related_pin}";\n')
+            fh.write(
+                f"{indent_str}  related_pin : {self._format_value(related_pin)};\n"
+            )
         when = power_data.get("when", "")
         if when and when != "()":
-            fh.write(f'{indent_str}  when : "{when}";\n')
+            fh.write(f"{indent_str}  when : {self._format_value(when)};\n")
 
         # Write power tables
         for key, value in power_data.items():
             if isinstance(value, dict) and "template" in value:
                 template_ref = self._resolve_template_name(value["template"], value)
-                fh.write(f"{indent_str}  {key}({template_ref}) {{\n")
+                fh.write(f"{indent_str}  {key} ({template_ref}) {{\n")
                 self._write_value_table(fh, indent + 2, value)
                 fh.write(f"{indent_str}  }}\n")
 
@@ -160,9 +212,11 @@ class Json2Liberty:
         indent_str = " " * indent
         if isinstance(leakage_data, list):
             for item in leakage_data:
-                fh.write(f"{indent_str}leakage_power() {{\n")
+                fh.write(f"{indent_str}leakage_power () {{\n")
                 if "when" in item:
-                    fh.write(f'{indent_str}  when : "{item["when"]}";\n')
+                    fh.write(
+                        f"{indent_str}  when : {self._format_value(item['when'])};\n"
+                    )
                 if "value" in item:
                     fh.write(f"{indent_str}  value : {item['value']};\n")
                 fh.write(f"{indent_str}}}\n")
@@ -220,7 +274,7 @@ class Json2Liberty:
     def _write_cell(self, fh, indent, cell_name, cell_data):
         """Write cell group data"""
         indent_str = " " * indent
-        fh.write(f"{indent_str}cell({cell_name}) {{\n")
+        fh.write(f"{indent_str}cell ({cell_name}) {{\n")
 
         # Write cell basic attributes
         if "cell_leakage_power" in cell_data:
@@ -237,51 +291,68 @@ class Json2Liberty:
             for pin_name, pin_data in cell_data["pins"].items():
                 self._write_pin(fh, indent + 2, pin_name, pin_data)
 
+        def _find_seq_group(prefix: str) -> tuple[str | None, dict | None]:
+            for key, value in cell_data.items():
+                if not isinstance(key, str):
+                    continue
+                if not key.startswith(prefix):
+                    continue
+                if not key.endswith(")"):
+                    continue
+                if isinstance(value, dict):
+                    return key, value
+            return None, None
+
+        def _format_seq_group_header(key: str) -> str:
+            # Legacy JSON stores keys without spaces: ff(IQ,IQN). Liberty formatting prefers "ff(IQ, IQN)".
+            return key.replace(",", ", ")
+
         # Write latch data - only when latch data is not empty
-        if "latch(IQ,IQN)" in cell_data:
-            latch_data = cell_data["latch(IQ,IQN)"]
-            if latch_data:
-                fh.write(f"{indent_str}  latch(IQ, IQN) {{\n")
-                if "clear" in latch_data:
-                    fh.write(f'{indent_str}    clear : "{latch_data["clear"]}";\n')
-                if "clear_preset_var1" in latch_data:
-                    fh.write(
-                        f"{indent_str}    clear_preset_var1 : {latch_data['clear_preset_var1']};\n"
-                    )
-                if "clear_preset_var2" in latch_data:
-                    fh.write(
-                        f"{indent_str}    clear_preset_var2 : {latch_data['clear_preset_var2']};\n"
-                    )
-                if "data_in" in latch_data:
-                    fh.write(
-                        f'{indent_str}    data_in : "{latch_data["data_in"]}";\n'
-                    )
-                if "enable" in latch_data:
-                    fh.write(
-                        f'{indent_str}    enable : "{latch_data["enable"]}";\n'
-                    )
-                if "power_down_function" in latch_data:
-                    fh.write(
-                        f'{indent_str}    power_down_function : "{latch_data["power_down_function"]}";\n'
-                    )
-                if "preset" in latch_data:
-                    fh.write(f'{indent_str}    preset : "{latch_data["preset"]}";\n')
-                fh.write(f"{indent_str}  }}\n")
+        latch_key, latch_data = _find_seq_group("latch(")
+        if latch_key and latch_data:
+            fh.write(f"{indent_str}  {_format_seq_group_header(latch_key)} {{\n")
+            if "clear" in latch_data:
+                fh.write(
+                    f"{indent_str}    clear : {self._format_value(latch_data['clear'])};\n"
+                )
+            if "clear_preset_var1" in latch_data:
+                fh.write(
+                    f"{indent_str}    clear_preset_var1 : {latch_data['clear_preset_var1']};\n"
+                )
+            if "clear_preset_var2" in latch_data:
+                fh.write(
+                    f"{indent_str}    clear_preset_var2 : {latch_data['clear_preset_var2']};\n"
+                )
+            if "data_in" in latch_data:
+                fh.write(
+                    f"{indent_str}    data_in : {self._format_value(latch_data['data_in'])};\n"
+                )
+            if "enable" in latch_data:
+                fh.write(
+                    f"{indent_str}    enable : {self._format_value(latch_data['enable'])};\n"
+                )
+            if "preset" in latch_data:
+                fh.write(
+                    f"{indent_str}    preset : {self._format_value(latch_data['preset'])};\n"
+                )
+            fh.write(f"{indent_str}  }}\n")
         # Write ff data - only when ff data is not empty
-        elif "ff(IQ,IQN)" in cell_data:
-            ff_data = cell_data["ff(IQ,IQN)"]
-            if ff_data:
-                fh.write(f"{indent_str}  ff(IQ, IQN) {{\n")
+        else:
+            ff_key, ff_data = _find_seq_group("ff(")
+            if ff_key and ff_data:
+                fh.write(f"{indent_str}  {_format_seq_group_header(ff_key)} {{\n")
                 if "clocked_on" in ff_data:
                     fh.write(
-                        f'{indent_str}    clocked_on : "{ff_data["clocked_on"]}";\n'
+                        f"{indent_str}    clocked_on : {self._format_value(ff_data['clocked_on'])};\n"
                     )
                 if "next_state" in ff_data:
                     fh.write(
-                        f'{indent_str}    next_state : "{ff_data["next_state"]}";\n'
+                        f"{indent_str}    next_state : {self._format_value(ff_data['next_state'])};\n"
                     )
                 if "clear" in ff_data:
-                    fh.write(f'{indent_str}    clear : "{ff_data["clear"]}";\n')
+                    fh.write(
+                        f"{indent_str}    clear : {self._format_value(ff_data['clear'])};\n"
+                    )
                 if "clear_preset_var1" in ff_data:
                     fh.write(
                         f"{indent_str}    clear_preset_var1 : {ff_data['clear_preset_var1']};\n"
@@ -291,10 +362,8 @@ class Json2Liberty:
                         f"{indent_str}    clear_preset_var2 : {ff_data['clear_preset_var2']};\n"
                     )
                 if "preset" in ff_data:
-                    fh.write(f'{indent_str}    preset : "{ff_data["preset"]}";\n')
-                if "power_down_function" in ff_data:
                     fh.write(
-                        f'{indent_str}    power_down_function : "{ff_data["power_down_function"]}";\n'
+                        f"{indent_str}    preset : {self._format_value(ff_data['preset'])};\n"
                     )
                 fh.write(f"{indent_str}  }}\n")
 
@@ -304,7 +373,7 @@ class Json2Liberty:
         """Write lu_table_templates"""
         for template_name, template_data in templates_data.items():
             # Remove quotes around template name to fix formatting
-            fh.write(f"  lu_table_template({template_name}) {{\n")
+            fh.write(f"  lu_table_template ({template_name}) {{\n")
 
             # Write variables
             if "variable_1" in template_data:
@@ -314,11 +383,11 @@ class Json2Liberty:
 
             # Write indexes
             if "index_1" in template_data:
-                index_1_str = ",".join(map(str, template_data["index_1"]))
-                fh.write(f'    index_1("{index_1_str}");\n')
+                index_1_str = ", ".join(map(str, template_data["index_1"]))
+                fh.write(f'    index_1 ("{index_1_str}");\n')
             if "index_2" in template_data:
-                index_2_str = ",".join(map(str, template_data["index_2"]))
-                fh.write(f'    index_2("{index_2_str}");\n')
+                index_2_str = ", ".join(map(str, template_data["index_2"]))
+                fh.write(f'    index_2 ("{index_2_str}");\n')
 
             fh.write("  }\n")
 
@@ -335,11 +404,11 @@ class Json2Liberty:
 
             # Write indexes
             if "index_1" in template_data:
-                index_1_str = ",".join(map(str, template_data["index_1"]))
-                fh.write(f'    index_1("{index_1_str}");\n')
+                index_1_str = ", ".join(map(str, template_data["index_1"]))
+                fh.write(f'    index_1 ("{index_1_str}");\n')
             if "index_2" in template_data:
-                index_2_str = ",".join(map(str, template_data["index_2"]))
-                fh.write(f'    index_2("{index_2_str}");\n')
+                index_2_str = ", ".join(map(str, template_data["index_2"]))
+                fh.write(f'    index_2 ("{index_2_str}");\n')
 
             fh.write("  }\n")
 
@@ -367,13 +436,11 @@ class Json2Liberty:
             self._write_power_lut_templates(fh, lib_data["power_lut_templates"])
 
     def _clean_content(self, content):
-        """Clean content, remove specific power blocks and replace async"""
+        """Clean content, remove specific power blocks."""
         # Remove rise_power blocks
-        content = re.sub(r"rise_power\(power_template_0x1\)\s*{[^}]*}", "", content)
+        content = re.sub(r"rise_power\s*\(power_template_0x1\)\s*{[^}]*}", "", content)
         # Remove fall_power blocks
-        content = re.sub(r"fall_power\(power_template_0x1\)\s*{[^}]*}", "", content)
-        # Replace async with clear
-        content = content.replace("async", "clear")
+        content = re.sub(r"fall_power\s*\(power_template_0x1\)\s*{[^}]*}", "", content)
         return content
 
     def convert(self, json_file, output_lib):
@@ -390,7 +457,7 @@ class Json2Liberty:
             # Handle library structure
             if "library" in data:
                 lib_name = data["library"].get("name", "my_library")
-                f.write(f"library({lib_name}) {{\n")
+                f.write(f"library ({lib_name}) {{\n")
 
                 # Write library attributes
                 self._write_library_attributes(f, data["library"])
@@ -403,7 +470,7 @@ class Json2Liberty:
                 f.write("}\n")
             else:
                 # Handle old format data
-                f.write("library(my_library) {\n")
+                f.write("library (my_library) {\n")
                 for cell_name, cell_data in data.items():
                     if cell_name not in ["process", "voltage", "temperature"]:
                         self._write_cell(f, 2, cell_name, cell_data)
